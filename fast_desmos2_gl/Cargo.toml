@@ -1,13 +1,12 @@
 [package]
-name = "fast_desmos2_render"
+name = "fast_desmos2_gl"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 color-eyre = "0.6.3"
+gl = "0.14.0"
 glam = "0.29.2"
-bitflags = "2.6.0"
+glfw = "0.58.0"
 
-fast_desmos2_fonts = { path = "../fast_desmos2_fonts" }
 fast_desmos2_utils = { path = "../fast_desmos2_utils" }
-fast_desmos2_gl = { path = "../fast_desmos2_gl" }

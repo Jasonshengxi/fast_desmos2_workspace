@@ -49,6 +49,12 @@ impl Drop for GlErrorGuard {
     }
 }
 
+impl Default for GlErrorGuard {
+    fn default() -> Self {
+        Self::new_internal(None)
+    }
+}
+
 impl GlErrorGuard {
     fn new_internal(name: Option<&'static str>) -> Self {
         if let Some(err) = GlError::try_get() {
@@ -61,7 +67,7 @@ impl GlErrorGuard {
     }
 
     pub fn new() -> Self {
-        Self::new_internal(None)
+        Self::default()
     }
 
     pub fn named(name: &'static str) -> Self {

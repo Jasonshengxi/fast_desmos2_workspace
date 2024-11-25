@@ -1,8 +1,9 @@
 use apps::TextApp;
 use color_eyre::{eyre::OptionExt, Result as EyreResult};
 use fast_desmos2_fonts::glyph_data;
-use gl_safe::{
+use fast_desmos2_gl::{
     glfw::{self, Window},
+    gl,
     info::GlString,
     GlError,
 };
@@ -10,7 +11,6 @@ use glam::IVec2;
 use input::WindowWithInput;
 
 mod apps;
-mod gl_safe;
 mod input;
 
 struct App {

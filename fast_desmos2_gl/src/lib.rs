@@ -9,6 +9,8 @@ pub mod vertex;
 
 pub use error::{GlError, GlErrorGuard};
 
+pub use gl;
+
 #[macro_export]
 macro_rules! transmutable_u32 {
     ($name: ident) => {

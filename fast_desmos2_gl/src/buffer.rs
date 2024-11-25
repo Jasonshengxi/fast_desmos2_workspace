@@ -201,6 +201,10 @@ impl<T> VecBuffer<T> {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn len(&self) -> Len {
         self.len
     }

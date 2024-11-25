@@ -10,7 +10,7 @@ out vec2 glyph_pos;
 
 layout(location=0) uniform vec2 transform_scale;
 
-layout(binding=4) buffer GlyphBounds {
+layout(binding=3) buffer GlyphBounds {
 	vec2 glyph_bounds[];
 };
 

@@ -1,4 +1,4 @@
-use crate::gl_safe::{
+use fast_desmos2_gl::{
     buffer::{
         AccessNature, Buffer, BufferBaseBinding, BufferBindTarget, DataUsage,
         VecBuffer,
@@ -6,6 +6,7 @@ use crate::gl_safe::{
     shader::{Shader, ShaderProgram},
     vertex::{AttrType, VertexArrayObject},
     GlErrorGuard,
+    gl,
 };
 use fast_desmos2_fonts::glyph_data::GpuGlyphData;
 use glam::{IVec2, Vec2};

@@ -4,7 +4,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::gl_safe::glfw::{Key, Window};
+use fast_desmos2_gl::glfw::{Key, Window, Action};
 
 pub struct WindowWithInput {
     window: Window,
@@ -33,10 +33,10 @@ impl WindowWithInput {
         let keys_pressed = leak(RefCell::new(HashSet::new()));
         let keys_released = leak(RefCell::new(HashSet::new()));
         window.install_key_callback(|key, action, _| match action {
-            glfw::Action::Press | glfw::Action::Repeat => {
+            Action::Press | Action::Repeat => {
                 keys_pressed.borrow_mut().insert(key);
             }
-            glfw::Action::Release => {
+            Action::Release => {
                 keys_released.borrow_mut().insert(key);
             }
         });

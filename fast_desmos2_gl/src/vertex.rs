@@ -79,6 +79,12 @@ impl VertexBufferBinding<'_, '_> {
     }
 }
 
+impl Default for VertexArrayObject {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VertexArrayObject {
     fn next_attr_index(&self) -> u32 {
         let attr_index = self.next_attr_binding.get();
