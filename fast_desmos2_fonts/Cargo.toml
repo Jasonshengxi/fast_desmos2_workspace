@@ -1,0 +1,12 @@
+[package]
+name = "fast_desmos2_fonts"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+color-eyre = "0.6.3"
+glam = "0.29.2"
+skrifa = "0.26.0"
+
+[dependencies.fast_desmos2_utils]
+path = "../fast_desmos2_utils"

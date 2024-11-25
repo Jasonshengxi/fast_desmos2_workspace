@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+
+members = [
+	"fast_desmos2",
+	"fast_desmos2_comms", "fast_desmos2_fonts", "fast_desmos2_parser", "fast_desmos2_render", "fast_desmos2_utils",
+]
