@@ -2,12 +2,12 @@ use apps::TextApp;
 use color_eyre::{eyre::OptionExt, Result as EyreResult};
 use fast_desmos2_fonts::glyph_data;
 use fast_desmos2_gl::{
-    glfw::{self, Window},
     gl,
+    glfw::{self, Window},
     info::GlString,
     GlError,
 };
-use glam::IVec2;
+use glam::{IVec2, Vec2};
 use input::WindowWithInput;
 
 mod apps;
@@ -37,8 +37,12 @@ impl App {
         println!("renderer: {renderer}");
         println!("version: {version}");
 
-        let (gpu_glyph_data, _) = glyph_data::new(include_bytes!("../../times_new_roman.ttf"))?;
-        let text_app = TextApp::new(gpu_glyph_data);
+        let (gpu_glyph_data, cpu_glyph_data) =
+            glyph_data::new(include_bytes!("../../times_new_roman.ttf"))?;
+        let mut text_app = TextApp::new(gpu_glyph_data);
+
+        let instances = cpu_glyph_data.layout("Hello world!".chars(), 0.5, Vec2::ZERO);
+        text_app.store_data(&instances.collect::<Vec<_>>());
 
         Self {
             window,

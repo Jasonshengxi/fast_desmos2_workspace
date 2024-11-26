@@ -61,15 +61,18 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
         verb_start: point_verb.verbs.len() as u32,
     });
 
-    Ok((GpuGlyphData {
-        points: point_verb.points,
-        verbs: point_verb.verbs,
-        glyph_starts,
-        bounds,
-    }, CpuGlyphData {
-        glyph_info,
-        baseline: -metrics.descent * scale,
-    }))
+    Ok((
+        GpuGlyphData {
+            points: point_verb.points,
+            verbs: point_verb.verbs,
+            glyph_starts,
+            bounds,
+        },
+        CpuGlyphData {
+            glyph_info,
+            baseline: -metrics.descent * scale,
+        },
+    ))
 }
 
 pub struct GlyphInfo {
@@ -177,38 +180,4 @@ impl CpuGlyphData {
     pub fn get_id(&self, char: char) -> Option<u32> {
         self.get_info(char).map(|x| x.glyph_id)
     }
-
-    // pub fn layout<I: IntoIterator<Item = char>>(
-    //     &self,
-    //     text: I,
-    //     size: f32,
-    //     pos: Vec2,
-    // ) -> LayoutIter<I::IntoIter> {
-    //     LayoutIter {
-    //         glyph: self,
-    //         chars: text.into_iter(),
-    //         size: Vec2::splat(size),
-    //         pos,
-    //     }
-    // }
 }
-
-// pub struct LayoutIter<'a, T> {
-//     glyph: &'a CpuGlyphData,
-//     chars: T,
-//     size: Vec2,
-//     pos: Vec2,
-// }
-
-// impl<'a, T: Iterator<Item = char>> Iterator for LayoutIter<'a, T> {
-//     type Item = GlyphInstance;
-//
-//     fn next(&mut self) -> Option<Self::Item> {
-//         let char = self.chars.next()?;
-//         let char_info = self.glyph.get_info(char).unwrap();
-//
-//         let result = GlyphInstance::new(self.pos, self.size, char_info.glyph_id);
-//         self.pos.x += char_info.advance * self.size.x;
-//         Some(result)
-//     }
-// }

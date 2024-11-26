@@ -56,13 +56,17 @@ impl Default for GlErrorGuard {
 }
 
 impl GlErrorGuard {
-    fn new_internal(name: Option<&'static str>) -> Self {
+    pub fn clear_existing(name: Option<&'static str>) {
         if let Some(err) = GlError::try_get() {
             match name {
                 Some(name) => println!("Existing error on guard \"{name}\" creation: {err:?}"),
                 None => println!("Existing error on guard creation: {err:?}"),
             }
         }
+    }
+
+    fn new_internal(name: Option<&'static str>) -> Self {
+        Self::clear_existing(name);
         Self { name }
     }
 

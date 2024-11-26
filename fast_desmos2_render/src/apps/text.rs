@@ -1,16 +1,13 @@
+use fast_desmos2_fonts::{glyph_data::GpuGlyphData, layout};
 use fast_desmos2_gl::{
-    buffer::{
-        AccessNature, Buffer, BufferBaseBinding, BufferBindTarget, DataUsage,
-        VecBuffer,
-    },
+    buffer::{AccessNature, Buffer, BufferBaseBinding, BufferBindTarget, DataUsage, VecBuffer},
+    gl,
     shader::{Shader, ShaderProgram},
     vertex::{AttrType, VertexArrayObject},
     GlErrorGuard,
-    gl,
 };
-use fast_desmos2_fonts::glyph_data::GpuGlyphData;
 use glam::{IVec2, Vec2};
-use std::num::NonZeroU32;
+use std::{ffi::CString, num::NonZeroU32};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -21,8 +18,14 @@ pub struct GlyphInstance {
 }
 
 impl GlyphInstance {
-    pub fn new(pos: Vec2, size: Vec2, index: u32) -> Self {
+    pub const fn new(pos: Vec2, size: Vec2, index: u32) -> Self {
         Self { pos, size, index }
+    }
+}
+
+impl layout::GlyphInstance for GlyphInstance {
+    fn new(pos: Vec2, size: Vec2, id: u32) -> Self {
+        Self::new(pos, size, id)
     }
 }
 
@@ -47,11 +50,7 @@ impl TextApp {
             DataUsage::STATIC_DRAW,
         );
 
-        let mut ib = VecBuffer::new(BufferBindTarget::ArrayBuffer, AccessNature::Draw);
-        ib.store_data(&[
-            GlyphInstance::new(Vec2::ZERO, Vec2::splat(0.2), 0),
-            GlyphInstance::new(Vec2::splat(0.5), Vec2::splat(0.1), 0),
-        ]);
+        let ib = VecBuffer::new(BufferBindTarget::ArrayBuffer, AccessNature::Draw);
 
         let vao = VertexArrayObject::new();
         let mut vb_attach = vao.attach_vertex_buffer(&vb, size_of::<Vec2>() as i32);
@@ -85,6 +84,22 @@ impl TextApp {
             aspect_transform,
             glyph_data_bindings,
         }
+        .and_check()
+    }
+
+    fn and_check(self) -> Self {
+        self.check();
+        self
+    }
+
+    fn check(&self) {
+        GlErrorGuard::clear_existing(Some("existing failure on check"));
+        self.bind_data();
+        self.program.validate();
+    }
+
+    pub fn store_data(&mut self, instances: &[GlyphInstance]) {
+        self.ib.store_data(instances);
     }
 
     pub fn on_resize(&mut self, new_size: IVec2) {
@@ -93,22 +108,37 @@ impl TextApp {
         self.aspect_transform = min_bound / new_size;
     }
 
-    pub fn render(&self) {
-        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT) };
-
-        GlErrorGuard::guard_named("Program bind", || self.program.use_self());
+    fn bind_data(&self) {
         GlErrorGuard::guard_named("VAO bind", || self.vao.use_self());
-        GlErrorGuard::guard_named("Uniform bind", || {
-            self.program.set_uniform_vec2(0, self.aspect_transform)
-        });
         GlErrorGuard::guard_named("SSBO bind", || {
             for buf in &self.glyph_data_bindings {
                 buf.bind_self();
             }
         });
+    }
 
+    fn bind_program(&self) {
+        GlErrorGuard::guard_named("Program bind", || self.program.use_self());
+    }
+
+    fn bind_uniform(&self) {
+        GlErrorGuard::guard_named("Uniform bind", || {
+            self.program.set_uniform_vec2(0, self.aspect_transform)
+        });
+    }
+
+    fn draw(&self) {
         GlErrorGuard::guard_named("Draw", || unsafe {
             gl::DrawArraysInstanced(gl::TRIANGLE_FAN, 0, 4, self.ib.len() as i32)
         });
+    }
+
+    pub fn render(&self) {
+        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT) };
+
+        self.bind_data();
+        self.bind_program();
+        self.bind_uniform();
+        self.draw();
     }
 }

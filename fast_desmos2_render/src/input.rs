@@ -4,7 +4,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use fast_desmos2_gl::glfw::{Key, Window, Action};
+use fast_desmos2_gl::glfw::{Action, Key, Window};
 
 pub struct WindowWithInput {
     window: Window,

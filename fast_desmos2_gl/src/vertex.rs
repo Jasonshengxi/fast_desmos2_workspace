@@ -29,12 +29,26 @@ pub enum AttrType {
 }
 transmutable_u32!(AttrType);
 
+enum GlVertexFormatFunc {
+    Float,
+    Int,
+    Long,
+}
+
 impl AttrType {
     pub fn size(&self) -> u32 {
         match self {
             Self::Float => 4,
             Self::Uint => 4,
             Self::Int => 4,
+        }
+    }
+
+    fn function_to_use(&self) -> GlVertexFormatFunc {
+        match self {
+            Self::Float => GlVertexFormatFunc::Float,
+            Self::Int => GlVertexFormatFunc::Int,
+            Self::Uint => GlVertexFormatFunc::Int,
         }
     }
 }
@@ -60,14 +74,36 @@ impl VertexBufferBinding<'_, '_> {
     pub fn add_attr(&mut self, attr_type: AttrType, component_count: u32) {
         let attr_index = self.vertex_array.next_attr_index();
         unsafe {
-            gl::VertexArrayAttribFormat(
-                self.vertex_array.as_handle(),
-                attr_index,
-                component_count as i32,
-                attr_type.to_u32(),
-                gl::FALSE,
-                self.next_offet,
-            );
+            match attr_type.function_to_use() {
+                GlVertexFormatFunc::Float => {
+                    gl::VertexArrayAttribFormat(
+                        self.vertex_array.as_handle(),
+                        attr_index,
+                        component_count as i32,
+                        attr_type.to_u32(),
+                        gl::FALSE,
+                        self.next_offet,
+                    )
+                }
+                GlVertexFormatFunc::Int => {
+                    gl::VertexArrayAttribIFormat(
+                        self.vertex_array.as_handle(),
+                        attr_index,
+                        component_count as i32,
+                        attr_type.to_u32(),
+                        self.next_offet,
+                    )
+                }
+                GlVertexFormatFunc::Long => {
+                    gl::VertexArrayAttribLFormat(
+                        self.vertex_array.as_handle(), 
+                        attr_index, 
+                        component_count as i32, 
+                        attr_type.to_u32(), 
+                        self.next_offet
+                    )
+                }
+            }
             self.next_offet += attr_type.size() * component_count;
             gl::VertexArrayAttribBinding(
                 self.vertex_array.as_handle(),

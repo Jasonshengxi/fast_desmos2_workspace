@@ -27,6 +27,34 @@ has_handle!(Shader);
 // }
 
 impl Shader {
+    fn query_and_print_info_log(handle: u32) {
+        let mut log_size = 0;
+        unsafe {
+            gl::GetShaderiv(handle, gl::INFO_LOG_LENGTH, &mut log_size);
+        }
+
+        let mut info_log: Vec<u8> = Vec::with_capacity(log_size as usize);
+        let mut bytes_written = 0;
+        unsafe {
+            gl::GetShaderInfoLog(
+                handle,
+                log_size,
+                &mut bytes_written,
+                info_log.as_mut_ptr().cast(),
+            );
+            gl::DeleteShader(handle);
+            info_log.set_len(bytes_written as usize);
+        }
+
+        let info_log = String::from_utf8(info_log).unwrap();
+        eprintln!("INFO LOG: {bytes_written} bytes out of {log_size} max");
+        eprintln!(" | ");
+        for line in info_log.lines() {
+            eprintln!(" | {}", line);
+        }
+        eprintln!(" | ");
+    }
+
     pub fn new_many_sources<const N: usize>(shader_type: ShaderType, sources: [&str; N]) -> Self {
         let handle = unsafe { gl::CreateShader(shader_type.to_u32()) };
         let lengths = sources.map(|s| s.len() as GLint);
@@ -37,41 +65,17 @@ impl Shader {
         }
 
         let mut success = 0;
-        unsafe {
-            gl::GetShaderiv(handle, gl::COMPILE_STATUS, &mut success);
-        }
+        unsafe { gl::GetShaderiv(handle, gl::COMPILE_STATUS, &mut success) };
 
         if success == gl::FALSE.into() {
             eprintln!("Shader compilation failed:");
-            let mut log_size = 0;
-            unsafe {
-                gl::GetShaderiv(handle, gl::INFO_LOG_LENGTH, &mut log_size);
-            }
-
-            let mut info_log: Vec<u8> = Vec::with_capacity(log_size as usize);
-            let mut bytes_written = 0;
-            unsafe {
-                gl::GetShaderInfoLog(
-                    handle,
-                    log_size,
-                    &mut bytes_written,
-                    info_log.as_mut_ptr().cast(),
-                );
-                gl::DeleteShader(handle);
-                info_log.set_len(bytes_written as usize);
-            }
-
-            let info_log = String::from_utf8(info_log).unwrap();
-            eprintln!(" | ");
-            for line in info_log.lines() {
-                eprintln!(" | {}", line);
-            }
-            eprintln!(" | ");
+            Self::query_and_print_info_log(handle);
             panic!("Shader compilation failed.")
         }
 
         Self { handle }
     }
+
 
     pub fn new(shader_type: ShaderType, source: &str) -> Self {
         Self::new_many_sources(shader_type, [source])
@@ -114,11 +118,57 @@ impl ShaderProgram {
                 gl::AttachShader(handle, shader.as_handle());
             }
             gl::LinkProgram(handle);
+
+            let mut link_success = 0;
+            gl::GetProgramiv(handle, gl::LINK_STATUS, &mut link_success);
+            if link_success != gl::TRUE.into() {
+                Self::query_and_print_info_log(handle);
+                panic!("Link failed!");
+            }
+
             for shader in shaders {
                 gl::DetachShader(handle, shader.as_handle());
                 // drop(shader);
             }
             Self { handle }
+        }
+    }
+
+    fn query_and_print_info_log(handle: u32) {
+        let mut log_size = 0;
+        unsafe { gl::GetProgramiv(handle, gl::INFO_LOG_LENGTH, &mut log_size) };
+
+        let mut info_log: Vec<u8> = Vec::with_capacity(log_size as usize);
+        let mut bytes_written = 0;
+        unsafe {
+            gl::GetProgramInfoLog(
+                handle,
+                log_size,
+                &mut bytes_written,
+                info_log.as_mut_ptr().cast(),
+            );
+            info_log.set_len(bytes_written as usize);
+        }
+
+        let info_log = String::from_utf8(info_log).unwrap();
+        eprintln!("INFO LOG: {bytes_written} bytes out of {log_size} max");
+        eprintln!(" | ");
+        for line in info_log.lines() {
+            eprintln!(" | {}", line);
+        }
+        eprintln!(" | ");
+    }
+
+    pub fn validate(&self) {
+        unsafe { gl::ValidateProgram(self.handle) };
+
+        let mut success = 0;
+        unsafe { gl::GetProgramiv(self.handle, gl::VALIDATE_STATUS, &mut success) };
+
+        if success == gl::FALSE.into() {
+            eprintln!("Shader validation failed:");
+            Self::query_and_print_info_log(self.handle);
+            panic!("Shader validation failed.")
         }
     }
 
