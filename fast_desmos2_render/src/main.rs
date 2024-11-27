@@ -38,10 +38,10 @@ impl App {
         println!("version: {version}");
 
         let (gpu_glyph_data, cpu_glyph_data) =
-            glyph_data::new(include_bytes!("../../times_new_roman.ttf"))?;
+            glyph_data::new(include_bytes!("../../cmunrm.ttf"))?;
         let mut text_app = TextApp::new(gpu_glyph_data);
 
-        let instances = cpu_glyph_data.layout("Hello world!".chars(), 0.5, Vec2::ZERO);
+        let instances = cpu_glyph_data.layout("Hello\nworld!".chars(), 0.5, Vec2::new(-0.5, 0.5));
         text_app.store_data(&instances.collect::<Vec<_>>());
 
         Self {

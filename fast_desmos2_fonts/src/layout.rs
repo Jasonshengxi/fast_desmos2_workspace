@@ -18,6 +18,7 @@ impl CpuGlyphData {
             glyph: self,
             chars: text.into_iter(),
             size: Vec2::splat(size),
+            init_x: pos.x,
             pos,
             _phantom: PhantomData,
         }
@@ -28,6 +29,7 @@ pub struct LayoutIter<'a, T, I: GlyphInstance> {
     glyph: &'a CpuGlyphData,
     chars: T,
     size: Vec2,
+    init_x: f32,
     pos: Vec2,
     _phantom: PhantomData<I>,
 }
@@ -37,10 +39,19 @@ impl<'a, T: Iterator<Item = char>, G: GlyphInstance> Iterator for LayoutIter<'a,
 
     fn next(&mut self) -> Option<Self::Item> {
         let char = self.chars.next()?;
-        let char_info = self.glyph.get_info(char).unwrap();
+        if char == '\n' {
+            self.pos.x = self.init_x;
+            self.pos.y -= 1.2 * self.size.y;
 
-        let result = GlyphInstance::new(self.pos, self.size, char_info.glyph_id);
-        self.pos.x += char_info.advance * self.size.x;
-        Some(result)
+            let char_info = self.glyph.get_info(' ').unwrap();
+            Some(GlyphInstance::new(self.pos, self.size, char_info.glyph_id))
+        } else {
+            let char_info = self.glyph.get_info(char).unwrap();
+
+            let result = GlyphInstance::new(self.pos, self.size, char_info.glyph_id);
+            self.pos.x += char_info.advance * self.size.x;
+            Some(result)
+        }
     }
 }
+

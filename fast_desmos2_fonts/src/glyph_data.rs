@@ -21,10 +21,15 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
     let outlines = font.outline_glyphs();
     let glyph_metrics = GlyphMetrics::new(&font, Size::unscaled(), LocationRef::default());
     let metrics = Metrics::new(&font, Size::unscaled(), LocationRef::default());
+    println!("metrics: {metrics:?}");
 
     // the maximum height of all glyphs.
-    let glyph_height = metrics.ascent - metrics.descent;
-    let scale = glyph_height.recip();
+    // ljt glyph_height = metrics.ascent - metrics.descent;
+    // let scale = glyph_height.recip();
+
+    const DPI: f32 = 96.0;
+    let scale = DPI / (72.0 * metrics.units_per_em as f32);
+    
 
     let mut point_verb = PointVerb::new();
     let mut glyph_starts = Vec::new();
@@ -70,7 +75,10 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
         },
         CpuGlyphData {
             glyph_info,
+            leading: metrics.leading * scale,
             baseline: -metrics.descent * scale,
+            descent: metrics.descent * scale,
+            ascent: metrics.ascent * scale,
         },
     ))
 }
@@ -90,6 +98,9 @@ pub struct GpuGlyphData {
 
 pub struct CpuGlyphData {
     baseline: f32,
+    leading: f32,
+    ascent: f32,
+    descent: f32,
     glyph_info: HashMap<char, GlyphInfo>,
 }
 
@@ -163,6 +174,18 @@ pub struct GlyphStarts {
 impl CpuGlyphData {
     pub fn baseline(&self) -> f32 {
         self.baseline
+    }
+
+    pub fn leading(&self) -> f32 {
+        self.leading
+    }
+
+    pub fn ascent(&self) -> f32 {
+        self.ascent
+    }
+
+    pub fn descent(&self) -> f32 {
+        self.descent
     }
 
     pub fn get_info(&self, char: char) -> Option<&GlyphInfo> {
