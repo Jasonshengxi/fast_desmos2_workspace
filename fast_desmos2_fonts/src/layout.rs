@@ -54,4 +54,3 @@ impl<'a, T: Iterator<Item = char>, G: GlyphInstance> Iterator for LayoutIter<'a,
         }
     }
 }
-

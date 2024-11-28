@@ -29,7 +29,6 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
 
     const DPI: f32 = 96.0;
     let scale = DPI / (72.0 * metrics.units_per_em as f32);
-    
 
     let mut point_verb = PointVerb::new();
     let mut glyph_starts = Vec::new();

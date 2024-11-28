@@ -76,7 +76,6 @@ impl Shader {
         Self { handle }
     }
 
-
     pub fn new(shader_type: ShaderType, source: &str) -> Self {
         Self::new_many_sources(shader_type, [source])
     }
