@@ -1,6 +1,6 @@
 use crate::{has_handle, transmutable_u32};
 use gl::types::*;
-use glam::Vec2;
+use glam::{Vec2, Vec4};
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,5 +179,9 @@ impl ShaderProgram {
 
     pub fn set_uniform_vec2(&self, location: i32, data: Vec2) {
         unsafe { gl::ProgramUniform2f(self.handle, location, data.x, data.y) };
+    }
+
+    pub fn set_uniform_vec4(&self, location: i32, data: Vec4) {
+        unsafe { gl::ProgramUniform4f(self.handle, location, data.x, data.y, data.z, data.w) };
     }
 }

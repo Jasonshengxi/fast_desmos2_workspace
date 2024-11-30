@@ -15,6 +15,8 @@ layout(binding=2) buffer GlyphStartses {
     uvec2 glyph_starts[];
 };
 
+layout(location=1) uniform vec4 on_color;
+
 struct IntersectResult {
     uint intersects;
     float closest;
@@ -199,8 +201,8 @@ void main() {
     }
 
     if ((total_intersects % 2) > 0) {
-        color = vec4(1.0, 1.0, 1.0, 1.0);
+        color = on_color;
     } else {
-        color = vec4(0.0, 0.0, 0.0, 1.0);
+        discard;
     }
 }

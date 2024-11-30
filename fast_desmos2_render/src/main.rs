@@ -1,12 +1,16 @@
-use apps::TextApp;
+use apps::text::{TextApp, GpuGlyphDataBindings};
 use color_eyre::{eyre::OptionExt, Result as EyreResult};
-use fast_desmos2_fonts::glyph_data;
+use fast_desmos2_fonts::{
+    glyph_data::{self, CpuGlyphData},
+    layout::LayoutNode,
+};
 use fast_desmos2_gl::{
     gl,
     glfw::{self, Window},
     info::GlString,
     GlError,
 };
+use fast_desmos2_utils as utils;
 use glam::{IVec2, Vec2};
 use input::WindowWithInput;
 
@@ -17,7 +21,7 @@ struct App {
     window: WindowWithInput,
     window_size: IVec2,
 
-    text_app: TextApp,
+    text_app: TextApp<'static>,
 }
 
 impl App {
@@ -37,12 +41,26 @@ impl App {
         println!("renderer: {renderer}");
         println!("version: {version}");
 
-        let (gpu_glyph_data, cpu_glyph_data) =
-            glyph_data::new(include_bytes!("../../cmunrm.ttf"))?;
-        let mut text_app = TextApp::new(gpu_glyph_data);
+        let (gpu_glyph_data, cpu_glyph_data) = glyph_data::new(include_bytes!("../../cmunrm.ttf"))?;
+        let glyph_bindings = utils::leak(GpuGlyphDataBindings::new(&gpu_glyph_data));
+        let mut text_app = TextApp::new(glyph_bindings);
 
-        let instances = cpu_glyph_data.layout("Hello\nworld!".chars(), 0.5, Vec2::new(-0.5, 0.5));
-        text_app.store_data(&instances.collect::<Vec<_>>());
+        let layout = LayoutNode::vertical(vec![
+            LayoutNode::horizontal(vec![
+                LayoutNode::str("Hello world!"),
+                LayoutNode::char(CpuGlyphData::RECT_CHAR),
+                LayoutNode::str("This is another."),
+            ]),
+            LayoutNode::horizontal(vec![LayoutNode::str("Bottom row.")]),
+        ]);
+
+        let mut inst_tree = layout.render(&cpu_glyph_data, 0.2).into_instances();
+        inst_tree.offset.x -= 1.0;
+
+        // println!("Tree: {inst_tree:#?}");
+
+        let instances = inst_tree.collect_vec();
+        text_app.store_data(&instances);
 
         Self {
             window,

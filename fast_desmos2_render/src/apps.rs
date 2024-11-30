@@ -1,3 +1,1 @@
-mod text;
-
-pub use text::TextApp;
+pub mod text;

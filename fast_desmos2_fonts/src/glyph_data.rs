@@ -11,7 +11,7 @@ use color_eyre::Result as EyreResult;
 use fast_desmos2_utils::OptExt;
 use glam::Vec2;
 use skrifa::metrics::{GlyphMetrics, Metrics};
-use skrifa::outline::DrawSettings;
+use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::prelude::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
 use std::collections::HashMap;
@@ -29,11 +29,39 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
 
     const DPI: f32 = 96.0;
     let scale = DPI / (72.0 * metrics.units_per_em as f32);
+    println!("Scale used: {scale}");
 
     let mut point_verb = PointVerb::new();
     let mut glyph_starts = Vec::new();
     let mut bounds = Vec::new();
     let mut glyph_info = HashMap::new();
+
+    // A default rectangle glyph
+    {
+        glyph_starts.push(GlyphStarts {
+            point_start: 0,
+            verb_start: 0,
+        });
+        point_verb.move_to(0., 0.);
+        point_verb.line_to(0., 1.);
+        point_verb.line_to(1., 1.);
+        point_verb.line_to(1., 0.);
+        point_verb.close();
+
+        let bbox = BoundingBox {
+            offset: Vec2::ZERO,
+            size: Vec2::ONE,
+        };
+        bounds.push(bbox);
+        glyph_info.insert(
+            CpuGlyphData::RECT_CHAR,
+            GlyphInfo {
+                bbox,
+                glyph_id: 0,
+                advance: 1.0,
+            },
+        );
+    }
     point_verb.set_modifier(move |x| x * scale);
 
     for (index, (char_id, glyph_id)) in font.charmap().mappings().enumerate() {
@@ -52,7 +80,7 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
         glyph_info.insert(
             char::from_u32(char_id).unwrap_unreach(),
             GlyphInfo {
-                glyph_id: index as u32,
+                glyph_id: index as u32 + 1,
                 advance: advance_width * scale,
                 bbox: bbox.scale(scale).into(),
             },
@@ -72,22 +100,24 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
             glyph_starts,
             bounds,
         },
-        CpuGlyphData {
+        (CpuGlyphData {
             glyph_info,
             leading: metrics.leading * scale,
             baseline: -metrics.descent * scale,
             descent: metrics.descent * scale,
             ascent: metrics.ascent * scale,
-        },
+        }),
     ))
 }
 
+#[derive(Debug)]
 pub struct GlyphInfo {
     pub glyph_id: u32,
     pub advance: f32,
     pub bbox: BoundingBox,
 }
 
+#[derive(Debug)]
 pub struct GpuGlyphData {
     pub bounds: Vec<BoundingBox>,
     pub points: Vec<Vec2>,
@@ -95,6 +125,7 @@ pub struct GpuGlyphData {
     pub glyph_starts: Vec<GlyphStarts>,
 }
 
+#[derive(Debug)]
 pub struct CpuGlyphData {
     baseline: f32,
     leading: f32,
@@ -104,7 +135,7 @@ pub struct CpuGlyphData {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct BoundingBox {
     pub size: Vec2,
     pub offset: Vec2,
@@ -128,12 +159,23 @@ impl BoundingBox {
         self.x_min() + self.size.x
     }
 
+    pub fn x_center(&self) -> f32 {
+        self.x_min() + 0.5 * self.size.x
+    }
+
     pub fn y_max(&self) -> f32 {
         self.y_min() + self.size.y
     }
 
     pub fn is_zero(&self) -> bool {
-        self.size == Vec2::ZERO
+        self.size.x == 0.0 || self.size.y == 0.0
+    }
+
+    pub fn transformed(self, offset: Vec2, scale: Vec2) -> Self {
+        Self {
+            offset: self.offset + offset,
+            size: self.size * scale,
+        }
     }
 
     pub fn union(self, other: Self) -> Self {
@@ -143,7 +185,7 @@ impl BoundingBox {
             self
         } else {
             let min = self.offset.min(other.offset);
-            let max = (self.offset + other.size).max(self.offset + other.size);
+            let max = (self.offset + self.size).max(other.offset + other.size);
             Self {
                 offset: min,
                 size: max - min,
@@ -164,13 +206,16 @@ impl From<skrifa::metrics::BoundingBox> for BoundingBox {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct GlyphStarts {
     pub point_start: u32,
     pub verb_start: u32,
 }
 
 impl CpuGlyphData {
+    /// The first reserved character from the PUA of Unicode.
+    pub const RECT_CHAR: char = '\u{f8ff}';
+
     pub fn baseline(&self) -> f32 {
         self.baseline
     }
