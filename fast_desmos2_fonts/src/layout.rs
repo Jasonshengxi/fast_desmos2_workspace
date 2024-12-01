@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::glyph_data::{BoundingBox, CpuGlyphData};
+use fast_desmos2_utils::OptExt;
 use glam::Vec2;
 
 pub trait GlyphInstance {
@@ -77,11 +78,24 @@ impl<I: GlyphInstance> InstTree<I> {
 
     pub fn collect_vec(self) -> Vec<I> {
         let mut result = Vec::new();
-        self.for_each_inst(&mut |x| result.push(x));
+        self.for_each_inst(&mut |x| result.push(x), &mut |_, _| {}, 0);
         result
     }
 
-    pub fn for_each_inst(self, func: &mut impl FnMut(I)) {
+    pub fn collect_vec_debug(self) -> (Vec<I>, Vec<(usize, BoundingBox)>) {
+        let mut result = Vec::new();
+        let mut bboxes = Vec::new();
+        self.for_each_inst(&mut |x| result.push(x), &mut |x, y| bboxes.push((x, y)), 0);
+        (result, bboxes)
+    }
+
+    pub fn for_each_inst(
+        self,
+        func: &mut impl FnMut(I),
+        bbox_debug: &mut impl FnMut(usize, BoundingBox),
+        depth: usize,
+    ) {
+        bbox_debug(depth, self.bbox());
         match self.kind {
             InstTreeKind::Node(node) => func(node.offset_by(self.offset)),
             InstTreeKind::Nodes(nodes) => nodes
@@ -89,7 +103,7 @@ impl<I: GlyphInstance> InstTree<I> {
                 .for_each(|node| func(node.offset_by(self.offset))),
             InstTreeKind::Children(children) => children.into_iter().for_each(|mut child| {
                 child.offset += self.offset;
-                child.for_each_inst(func);
+                child.for_each_inst(func, bbox_debug, depth + 1);
             }),
         }
     }
@@ -151,7 +165,7 @@ impl<'a> LayoutNode<'a> {
                     bbox = bbox.union(
                         char_info
                             .bbox
-                            .transformed(Vec2::new(current_x, 0.0), size_vec),
+                            .transformed_alt(Vec2::new(current_x, 0.0), size_vec),
                     );
                     let result =
                         GlyphInstance::new(Vec2::new(current_x, 0.0), size_vec, char_info.glyph_id);
@@ -170,7 +184,7 @@ impl<'a> LayoutNode<'a> {
                 let size_vec = Vec2::splat(size);
                 let char_info = glyph_data.get_info(c).unwrap();
 
-                let bbox = char_info.bbox.transformed(Vec2::ZERO, size_vec);
+                let bbox = char_info.bbox.transformed_alt(Vec2::ZERO, size_vec);
                 let result = GlyphInstance::new(Vec2::ZERO, size_vec, char_info.glyph_id);
 
                 NodeRenderOutcome {
@@ -210,17 +224,16 @@ impl<'a> LayoutNode<'a> {
                     let mut outcome = node.render(glyph_data, size);
                     outcome.instances.offset.y = current_y;
 
-
                     current_y += outcome.advance.y;
                     advance_x = advance_x.max(outcome.advance.x);
-                    max_x = max_x.max(outcome.instances.bbox().x_max());
+                    max_x = max_x.max(outcome.instances.bbox().max_pos().x);
 
                     children.push(outcome.instances);
                 }
 
                 let bbox_middle = max_x / 2.0;
                 for node in children.iter_mut() {
-                    let node_middle = node.bbox().x_center();
+                    let node_middle = node.bbox().center().x;
                     node.offset.x += bbox_middle - node_middle;
                 }
 
@@ -237,7 +250,54 @@ impl<'a> LayoutNode<'a> {
                 ref top,
                 middle,
                 ref bottom,
-            } => todo!(),
+            } => {
+                let top_inst = top.render::<I>(glyph_data, size);
+                let bottom_inst = bottom.render::<I>(glyph_data, size);
+
+                let max_advance_x = top_inst.advance.x.max(bottom_inst.advance.x);
+                let big_box = top_inst
+                    .instances
+                    .bbox()
+                    .union(bottom_inst.instances.bbox());
+                let x_center = big_box.center().x;
+
+                let mid_info = glyph_data.get_info(CpuGlyphData::RECT_CHAR).unwrap_unreach();
+                // let mid_offset = Vec2::new(big_box.x_min(), top_inst.instances.bbox().y_min());
+                // let mid_bbox = mid_info.bbox.transformed(mid_offset, mid_scale);
+                // let mid_instance = I::new(mid_offset, mid_scale, mid_info.glyph_id);
+
+                let top_bbox = top_inst.instances.bbox();
+                let mid_scale = Vec2::new(big_box.size().x, middle * size);
+                let mid_offset = Vec2::new(0.0, top_bbox.min_pos().y - mid_scale.y);
+                let mid_bbox = mid_info.bbox.transformed_alt(mid_offset, mid_scale);
+                let mid_instance = I::new(mid_offset, mid_scale, mid_info.glyph_id);
+
+                let top_offset = Vec2::new(x_center - top_inst.instances.bbox().center().x, 0.0);
+                let bottom_offset = Vec2::new(
+                    x_center - bottom_inst.instances.bbox().center().x,
+                    top_inst.advance.y - mid_scale.y,
+                );
+                let total_advance = bottom_offset.y + bottom_inst.advance.y;
+
+                let mut top_inst = top_inst.instances;
+                let mut bottom_inst = bottom_inst.instances;
+                top_inst.offset += top_offset;
+                bottom_inst.offset += bottom_offset;
+
+                let bbox = top_inst.bbox().union(bottom_inst.bbox());
+
+                NodeRenderOutcome {
+                    advance: Vec2::new(max_advance_x, bottom_offset.y + total_advance),
+                    instances: InstTree::new_children(
+                        bbox,
+                        vec![
+                            top_inst,
+                            InstTree::new_node(mid_bbox, mid_instance),
+                            bottom_inst,
+                        ],
+                    ),
+                }
+            }
             LayoutKind::SurroundHorizontal {
                 left,
                 ref middle,
@@ -251,7 +311,8 @@ impl<'a> LayoutNode<'a> {
     }
 
     pub fn str(str: &'a str) -> Self {
-        Self::new(LayoutKind::Str(str))
+        // Self::new(LayoutKind::Str(str))
+        Self::horizontal(str.chars().map(Self::char).collect())
     }
 
     pub fn char(char: char) -> Self {
@@ -264,6 +325,14 @@ impl<'a> LayoutNode<'a> {
 
     pub fn vertical(nodes: Vec<Self>) -> Self {
         Self::new(LayoutKind::Vertical(nodes))
+    }
+
+    pub fn sandwich_vertical(top: Self, middle: f32, bottom: Self) -> Self {
+        Self::new(LayoutKind::SandwichVertical {
+            top: Box::new(top),
+            middle,
+            bottom: Box::new(bottom),
+        })
     }
 }
 
@@ -279,7 +348,7 @@ pub enum LayoutKind<'a> {
     },
     SandwichVertical {
         top: Box<LayoutNode<'a>>,
-        middle: char,
+        middle: f32,
         bottom: Box<LayoutNode<'a>>,
     },
 }

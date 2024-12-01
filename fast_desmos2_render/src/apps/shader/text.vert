@@ -15,7 +15,7 @@ layout(binding=3) buffer GlyphBounds {
 };
 
 void main() {
-	glyph_index= glyph_index_in;
+	glyph_index = glyph_index_in;
 
 	uint bound_ind = 2 * glyph_index_in;
 	vec2 bound_size = glyph_bounds[bound_ind];

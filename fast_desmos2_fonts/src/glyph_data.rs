@@ -21,7 +21,7 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
     let outlines = font.outline_glyphs();
     let glyph_metrics = GlyphMetrics::new(&font, Size::unscaled(), LocationRef::default());
     let metrics = Metrics::new(&font, Size::unscaled(), LocationRef::default());
-    println!("metrics: {metrics:?}");
+    // println!("metrics: {metrics:?}");
 
     // the maximum height of all glyphs.
     // ljt glyph_height = metrics.ascent - metrics.descent;
@@ -29,7 +29,7 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
 
     const DPI: f32 = 96.0;
     let scale = DPI / (72.0 * metrics.units_per_em as f32);
-    println!("Scale used: {scale}");
+    // println!("Scale used: {scale}");
 
     let mut point_verb = PointVerb::new();
     let mut glyph_starts = Vec::new();
@@ -138,42 +138,54 @@ pub struct CpuGlyphData {
 #[derive(Debug, Copy, Clone)]
 pub struct BoundingBox {
     pub size: Vec2,
+    // pub scaling_offset: Vec2,
     pub offset: Vec2,
 }
 
 impl BoundingBox {
     pub const ZERO: Self = Self {
         size: Vec2::ZERO,
+        // scaling_offset: Vec2::ZERO,
         offset: Vec2::ZERO,
     };
 
-    pub fn x_min(&self) -> f32 {
-        self.offset.x
+    pub fn size(&self) -> Vec2 {
+        self.size
     }
 
-    pub fn y_min(&self) -> f32 {
-        self.offset.y
+    pub fn offset(&self) -> Vec2 {
+        self.offset // + self.scaling_offset
     }
 
-    pub fn x_max(&self) -> f32 {
-        self.x_min() + self.size.x
+    pub fn min_pos(&self) -> Vec2 {
+        self.offset()
     }
 
-    pub fn x_center(&self) -> f32 {
-        self.x_min() + 0.5 * self.size.x
+    pub fn max_pos(&self) -> Vec2 {
+        self.offset() + self.size
     }
 
-    pub fn y_max(&self) -> f32 {
-        self.y_min() + self.size.y
+    pub fn center(&self) -> Vec2 {
+        self.offset() + 0.5 * self.size
     }
 
     pub fn is_zero(&self) -> bool {
         self.size.x == 0.0 || self.size.y == 0.0
     }
 
+    /// Scale and offset are applied separately
     pub fn transformed(self, offset: Vec2, scale: Vec2) -> Self {
         Self {
             offset: self.offset + offset,
+            // scaling_offset: self.scaling_offset * scale,
+            size: self.size * scale,
+        }
+    }
+
+    /// Scale the entire box around the origin by `scale`, then translate by `offset`
+    pub fn transformed_alt(self, offset: Vec2, scale: Vec2) -> Self {
+        Self {
+            offset: self.offset * scale + offset,
             size: self.size * scale,
         }
     }
@@ -184,8 +196,8 @@ impl BoundingBox {
         } else if other.is_zero() {
             self
         } else {
-            let min = self.offset.min(other.offset);
-            let max = (self.offset + self.size).max(other.offset + other.size);
+            let min = self.min_pos().min(other.min_pos());
+            let max = self.max_pos().max(other.max_pos());
             Self {
                 offset: min,
                 size: max - min,

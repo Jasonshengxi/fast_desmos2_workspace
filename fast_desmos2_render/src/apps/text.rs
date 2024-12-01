@@ -1,4 +1,7 @@
-use fast_desmos2_fonts::{glyph_data::GpuGlyphData, layout};
+use fast_desmos2_fonts::{
+    glyph_data::{BoundingBox, GpuGlyphData},
+    layout,
+};
 use fast_desmos2_gl::{
     buffer::{AccessNature, Buffer, BufferBaseBinding, BufferBindTarget, DataUsage, VecBuffer},
     gl,
@@ -20,6 +23,12 @@ pub struct GlyphInstance {
 impl GlyphInstance {
     pub const fn new(pos: Vec2, size: Vec2, index: u32) -> Self {
         Self { pos, size, index }
+    }
+}
+
+impl From<BoundingBox> for GlyphInstance {
+    fn from(value: BoundingBox) -> Self {
+        Self::new(value.offset, value.size, 0)
     }
 }
 
@@ -69,6 +78,8 @@ pub struct TextApp<'glyph> {
     vao: VertexArrayObject,
     program: ShaderProgram,
 
+    text_color: Vec4,
+
     aspect_transform: Vec2,
     glyph_data_bindings: &'glyph GpuGlyphDataBindings,
 }
@@ -106,6 +117,7 @@ impl<'glyph> TextApp<'glyph> {
             program,
             aspect_transform,
             glyph_data_bindings,
+            text_color: Vec4::ONE,
         }
         .and_check()
     }
@@ -123,6 +135,10 @@ impl<'glyph> TextApp<'glyph> {
 
     pub fn store_data(&mut self, instances: &[GlyphInstance]) {
         self.ib.store_data(instances);
+    }
+
+    pub fn set_text_color(&mut self, color: Vec4) {
+        self.text_color = color;
     }
 
     pub fn on_resize(&mut self, new_size: IVec2) {
@@ -143,8 +159,7 @@ impl<'glyph> TextApp<'glyph> {
     fn bind_uniform(&self) {
         GlErrorGuard::guard_named("Uniform bind", || {
             self.program.set_uniform_vec2(0, self.aspect_transform);
-            self.program
-                .set_uniform_vec4(1, Vec4::new(1.0, 0.0, 0.0, 1.0));
+            self.program.set_uniform_vec4(1, self.text_color);
         });
     }
 
@@ -155,8 +170,6 @@ impl<'glyph> TextApp<'glyph> {
     }
 
     pub fn render(&self) {
-        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT) };
-
         self.bind_data();
         self.bind_program();
         self.bind_uniform();
