@@ -113,7 +113,7 @@ impl Window {
         unsafe { ffi::glfwMakeContextCurrent(self.window.as_ptr()) };
     }
 
-    pub fn get_key_pressed(&self, key: Key) -> bool {
+    pub fn is_key_down(&self, key: Key) -> bool {
         let points =
             unsafe { ffi::glfwGetKey(self.window.as_ptr(), std::mem::transmute::<Key, i32>(key)) };
         match points {
@@ -149,6 +149,20 @@ impl Window {
             )
         };
     }
+
+    pub fn install_scroll_callback(&self, callback: impl ScrollCallback) {
+        set_scroll_callback(callback);
+        unsafe { ffi::glfwSetScrollCallback(self.window.as_ptr(), Some(scroll_callback)) };
+    }
+}
+
+extern "C" fn scroll_callback(_window: *mut ffi::GLFWwindow, x: f64, y: f64) {
+    let scroll = DVec2::new(x, y);
+    SCROLL_CALLBACK.with_borrow_mut(|callback| {
+        if let Some(callback) = callback.as_mut() {
+            callback(scroll);
+        }
+    })
 }
 
 extern "C" fn key_callback(
@@ -205,3 +219,6 @@ store_callback!(static KEY_CALLBACK: KeyCallback = set_key_callback);
 
 trait_alias!(pub trait FramebufferSizeCallback = FnMut(IVec2) + 'static);
 store_callback!(static FRAMEBUFFER_SIZE_CALLBACK: FramebufferSizeCallback = set_framebuffer_size_callback);
+
+trait_alias!(pub trait ScrollCallback = FnMut(DVec2) + 'static);
+store_callback!(static SCROLL_CALLBACK: ScrollCallback = set_scroll_callback);

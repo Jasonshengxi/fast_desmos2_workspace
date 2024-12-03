@@ -1,8 +1,8 @@
 use apps::text::{GlyphInstance, GpuGlyphDataBindings, TextApp};
 use color_eyre::{eyre::OptionExt, Result as EyreResult};
 use fast_desmos2_fonts::{
-    glyph_data::{self, BoundingBox, CpuGlyphData},
-    layout::{InstTree, LayoutNode},
+    glyph_data,
+    layout::LayoutNode,
 };
 use fast_desmos2_gl::{
     gl,
@@ -11,9 +11,8 @@ use fast_desmos2_gl::{
     GlError,
 };
 use fast_desmos2_utils as utils;
-use glam::{IVec2, Vec2, Vec4};
+use glam::{IVec2, Vec4};
 use input::WindowWithInput;
-use okhsl::Okhsv;
 
 mod apps;
 mod input;
@@ -48,18 +47,18 @@ impl App {
         let glyph_bindings = utils::leak(GpuGlyphDataBindings::new(&gpu_glyph_data));
         let mut text_app = TextApp::new(glyph_bindings);
 
-        let layout = LayoutNode::sandwich_vertical(
-            LayoutNode::horizontal(vec![
+        let layout = LayoutNode::surround_horizontal(
+            '(',
+            LayoutNode::vertical(vec![
                 LayoutNode::str("x"),
                 LayoutNode::char('+'),
                 LayoutNode::str("cos(y)"),
             ]),
-            0.1,
-            LayoutNode::str("128"),
+            ')',
         );
         // let layout = LayoutNode::sandwich_vertical(LayoutNode::str("a+b=2"), ('i', 1.0), LayoutNode::str("sin(x)"));
 
-        let mut inst_tree1 = layout.render(&cpu_glyph_data, 0.5).into_instances();
+        let mut inst_tree1 = layout.render(&cpu_glyph_data, 0.2).into_instances();
         inst_tree1.offset.x -= 0.5;
         // let mut inst_tree2 = layout.render(&cpu_glyph_data, 1.0).into_instances();
         // inst_tree2.offset.x += 0.5;
@@ -80,16 +79,19 @@ impl App {
         let mut debug_boxes = [(); DEBUG_LAYERS].map(|_| TextApp::new(glyph_bindings));
         let mut vec_bboxes = [const { Vec::new() }; DEBUG_LAYERS];
         for (index, bbox) in bboxes {
-            vec_bboxes[index].push(GlyphInstance::from(bbox));
+            vec_bboxes
+                .get_mut(index)
+                .expect("Not enough debug layers!")
+                .push(GlyphInstance::from(bbox));
         }
 
         for (index, debug_boxes) in debug_boxes.iter_mut().enumerate() {
             let percentage = index as f64 / ((DEBUG_LAYERS - 1) as f64);
             let okhsl::Rgb { r, g, b } = okhsl::oklab_to_linear_srgb(
                 okhsl::Okhsv {
-                    h: 0.4 + 0.1 * percentage,
+                    h: 0.4 + 0.3 * percentage,
                     s: 1.0,
-                    v: 0.7 - 0.2 * percentage as f32,
+                    v: 0.9 - 0.2 * percentage as f32,
                 }
                 .to_oklab(),
             );
@@ -138,7 +140,9 @@ impl App {
         glfw::poll_events();
 
         unsafe { gl::Clear(gl::COLOR_BUFFER_BIT) };
-        self.debug_boxes.iter().for_each(|x| x.render());
+        if !self.window.is_key_down(glfw::Key::Space) {
+            self.debug_boxes.iter().for_each(|x| x.render());
+        }
         self.text_app.render();
     }
 }

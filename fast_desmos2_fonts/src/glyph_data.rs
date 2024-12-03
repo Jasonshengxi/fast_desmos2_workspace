@@ -5,6 +5,7 @@
 //! - The converted coordinate system.
 
 use crate::fonts::Verb;
+use crate::layout::GlyphInstance;
 
 use super::fonts::PointVerb;
 use color_eyre::Result as EyreResult;
@@ -110,11 +111,20 @@ pub fn new(data: &[u8]) -> EyreResult<(GpuGlyphData, CpuGlyphData)> {
     ))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct GlyphInfo {
     pub glyph_id: u32,
     pub advance: f32,
     pub bbox: BoundingBox,
+}
+
+impl GlyphInfo {
+    pub fn create_instance<I: GlyphInstance>(&self, offset: Vec2, size: Vec2) -> (BoundingBox, I) {
+        (
+            self.bbox.transformed_alt(offset, size),
+            I::new(offset, size, self.glyph_id),
+        )
+    }
 }
 
 #[derive(Debug)]

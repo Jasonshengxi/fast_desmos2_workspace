@@ -116,7 +116,14 @@ impl<I: GlyphInstance> InstTree<I> {
         }
     }
 
-    pub fn new_children(bbox: BoundingBox, children: Vec<InstTree<I>>) -> Self {
+    pub fn new_children(children: Vec<InstTree<I>>) -> Self {
+        let bbox = children
+            .iter()
+            .fold(BoundingBox::ZERO, |bbox, child| child.bbox().union(bbox));
+        Self::new(bbox, InstTreeKind::Children(children))
+    }
+
+    pub fn new_children_bbox(bbox: BoundingBox, children: Vec<InstTree<I>>) -> Self {
         Self::new(bbox, InstTreeKind::Children(children))
     }
 
@@ -193,7 +200,6 @@ impl<'a> LayoutNode<'a> {
                 }
             }
             LayoutKind::Horizontal(ref nodes) => {
-                let mut bbox = BoundingBox::ZERO;
                 let mut current_x = 0f32;
                 let mut advance_y = 0f32;
                 let mut children = Vec::with_capacity(nodes.len());
@@ -202,7 +208,6 @@ impl<'a> LayoutNode<'a> {
                     let mut outcome = node.render(glyph_data, size);
                     outcome.instances.offset.x = current_x;
 
-                    bbox = bbox.union(outcome.instances.bbox());
                     current_x += outcome.advance.x;
                     advance_y = advance_y.min(outcome.advance.y);
 
@@ -211,21 +216,21 @@ impl<'a> LayoutNode<'a> {
 
                 NodeRenderOutcome {
                     advance: Vec2::new(current_x, advance_y),
-                    instances: InstTree::new_children(bbox, children),
+                    instances: InstTree::new_children(children),
                 }
             }
             LayoutKind::Vertical(ref nodes) => {
                 let mut current_y = 0f32;
-                let mut advance_x = 0f32;
                 let mut max_x = 0f32;
                 let mut children = Vec::with_capacity(nodes.len());
+                let mut advances = Vec::with_capacity(nodes.len());
 
                 for node in nodes {
                     let mut outcome = node.render(glyph_data, size);
                     outcome.instances.offset.y = current_y;
+                    advances.push(outcome.advance.x);
 
                     current_y += outcome.advance.y;
-                    advance_x = advance_x.max(outcome.advance.x);
                     max_x = max_x.max(outcome.instances.bbox().max_pos().x);
 
                     children.push(outcome.instances);
@@ -237,18 +242,20 @@ impl<'a> LayoutNode<'a> {
                     node.offset.x += bbox_middle - node_middle;
                 }
 
-                let bbox = children
+                let advance_x = children
                     .iter()
-                    .fold(BoundingBox::ZERO, |bbox, node| bbox.union(node.bbox()));
+                    .zip(advances.iter())
+                    .fold(0.0f32, |acc, (child, &advance)| {
+                        acc.max(child.offset.x + advance)
+                    });
 
                 NodeRenderOutcome {
                     advance: Vec2::new(advance_x, current_y),
-                    instances: InstTree::new_children(bbox, children),
+                    instances: InstTree::new_children(children),
                 }
             }
             LayoutKind::SandwichVertical {
                 ref top,
-                middle,
                 ref bottom,
             } => {
                 let top_inst = top.render::<I>(glyph_data, size);
@@ -261,21 +268,25 @@ impl<'a> LayoutNode<'a> {
                     .union(bottom_inst.instances.bbox());
                 let x_center = big_box.center().x;
 
-                let mid_info = glyph_data.get_info(CpuGlyphData::RECT_CHAR).unwrap_unreach();
+                let mid_info = glyph_data
+                    .get_info(CpuGlyphData::RECT_CHAR)
+                    .unwrap_unreach();
                 // let mid_offset = Vec2::new(big_box.x_min(), top_inst.instances.bbox().y_min());
                 // let mid_bbox = mid_info.bbox.transformed(mid_offset, mid_scale);
                 // let mid_instance = I::new(mid_offset, mid_scale, mid_info.glyph_id);
 
+                const MIDDLE_HEIGHT: f32 = 0.1;
+                const MIDDLE_MARGIN: f32 = 0.05;
                 let top_bbox = top_inst.instances.bbox();
-                let mid_scale = Vec2::new(big_box.size().x, middle * size);
-                let mid_offset = Vec2::new(0.0, top_bbox.min_pos().y - mid_scale.y);
+                let mid_scale = Vec2::new(big_box.size().x, MIDDLE_HEIGHT * size);
+                let mid_offset = Vec2::new(0.0, top_bbox.min_pos().y - mid_scale.y - MIDDLE_MARGIN);
                 let mid_bbox = mid_info.bbox.transformed_alt(mid_offset, mid_scale);
                 let mid_instance = I::new(mid_offset, mid_scale, mid_info.glyph_id);
 
                 let top_offset = Vec2::new(x_center - top_inst.instances.bbox().center().x, 0.0);
                 let bottom_offset = Vec2::new(
                     x_center - bottom_inst.instances.bbox().center().x,
-                    top_inst.advance.y - mid_scale.y,
+                    top_inst.advance.y - mid_scale.y - 2.0 * MIDDLE_MARGIN,
                 );
                 let total_advance = bottom_offset.y + bottom_inst.advance.y;
 
@@ -288,7 +299,7 @@ impl<'a> LayoutNode<'a> {
 
                 NodeRenderOutcome {
                     advance: Vec2::new(max_advance_x, bottom_offset.y + total_advance),
-                    instances: InstTree::new_children(
+                    instances: InstTree::new_children_bbox(
                         bbox,
                         vec![
                             top_inst,
@@ -302,7 +313,39 @@ impl<'a> LayoutNode<'a> {
                 left,
                 ref middle,
                 right,
-            } => todo!(),
+            } => {
+                let left_info = glyph_data.get_info(left).unwrap_unreach();
+                let right_info = glyph_data.get_info(right).unwrap_unreach();
+
+                let mut mid_inst = middle.render::<I>(glyph_data, size);
+                mid_inst.instances.offset.x += left_info.advance * size;
+                let target_bbox = mid_inst.instances.bbox();
+
+                let target_height = target_bbox.size().y;
+                let target_offset = target_bbox.offset().y;
+
+                let left_scale = target_height / left_info.bbox.size().y;
+                let left_shift_y = target_offset - (left_info.bbox.offset().y * left_scale);
+                let (left_bbox, left_inst) = left_info
+                    .create_instance(Vec2::new(0.0, left_shift_y), Vec2::new(size, left_scale));
+
+                let right_scale = target_height / right_info.bbox.size().y;
+                let right_shift_y = target_offset - (right_info.bbox.offset().y * right_scale);
+                let (right_bbox, right_inst) = right_info.create_instance(
+                    Vec2::new(left_info.advance * size + mid_inst.advance.x, right_shift_y),
+                    Vec2::new(size, right_scale),
+                );
+
+                NodeRenderOutcome {
+                    advance: Vec2::new(left_info.advance + right_info.advance, 0.0) * size
+                        + mid_inst.advance,
+                    instances: InstTree::new_children(vec![
+                        InstTree::new_node(left_bbox, left_inst),
+                        mid_inst.instances,
+                        InstTree::new_node(right_bbox, right_inst),
+                    ]),
+                }
+            }
         }
     }
 
@@ -327,11 +370,18 @@ impl<'a> LayoutNode<'a> {
         Self::new(LayoutKind::Vertical(nodes))
     }
 
-    pub fn sandwich_vertical(top: Self, middle: f32, bottom: Self) -> Self {
+    pub fn sandwich_vertical(top: Self, bottom: Self) -> Self {
         Self::new(LayoutKind::SandwichVertical {
             top: Box::new(top),
-            middle,
             bottom: Box::new(bottom),
+        })
+    }
+
+    pub fn surround_horizontal(left: char, middle: Self, right: char) -> Self {
+        Self::new(LayoutKind::SurroundHorizontal {
+            left,
+            middle: Box::new(middle),
+            right,
         })
     }
 }
@@ -348,7 +398,6 @@ pub enum LayoutKind<'a> {
     },
     SandwichVertical {
         top: Box<LayoutNode<'a>>,
-        middle: f32,
         bottom: Box<LayoutNode<'a>>,
     },
 }
