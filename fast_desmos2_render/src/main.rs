@@ -1,9 +1,6 @@
 use apps::text::{GlyphInstance, GpuGlyphDataBindings, TextApp};
 use color_eyre::{eyre::OptionExt, Result as EyreResult};
-use fast_desmos2_fonts::{
-    glyph_data,
-    layout::LayoutNode,
-};
+use fast_desmos2_fonts::{glyph_data, layout::LayoutNode};
 use fast_desmos2_gl::{
     gl,
     glfw::{self, Window},

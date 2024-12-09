@@ -3,4 +3,15 @@ name = "fast_desmos2_tree"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "fast_desmos2_tree"
+required-features = ["binary"]
+
+[features]
+default = ["binary"]
+binary = ["termion"]
+termion = ["dep:termion"]
+
 [dependencies]
+glam = "0.29.2"
+termion = { version = "4.0.3", optional = true }
