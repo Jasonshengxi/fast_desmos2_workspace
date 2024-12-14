@@ -1,14 +1,18 @@
-mod debug;
+pub use actions::{ActionOutcome, TreeAction};
+pub use movement::{TreeMovable, TreeMove};
 
-#[derive(Debug, PartialEq)]
+mod actions;
+pub mod debug;
+mod movement;
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeSeq {
     cursor: usize,
     children: Vec<EditorTree>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorTree {
-    cursor: usize,
     kind: EditorTreeKind,
 }
 
@@ -44,255 +48,228 @@ impl EditorTreeSeq {
         self.children.get_mut(self.cursor)
     }
 
-    pub fn apply_move(&mut self, movement: TreeMove) -> Option<TreeMove> {
-        let movement = self
-            .children
-            .get_mut(self.cursor)
-            .map_or(Some(movement), |child| child.apply_move(movement));
-
-        match movement {
-            Some(TreeMove::Left) => {
-                if self.cursor == 0 {
-                    Some(TreeMove::Left)
-                } else {
-                    self.cursor -= 1;
-                    self.children[self.cursor].enter_from(TreeMove::Right);
-                    None
-                }
-            }
-            Some(TreeMove::Right) => {
-                if self.cursor >= self.children.len() {
-                    Some(TreeMove::Right)
-                } else {
-                    self.cursor += 1;
-                    if let Some(child) = self.children.get_mut(self.cursor) {
-                        child.enter_from(TreeMove::Left);
-                    }
-                    None
-                }
-            }
-            Some(up_or_down) => Some(up_or_down),
-            None => None,
-        }
-    }
-
-    pub fn enter_from(&mut self, direction: TreeMove) {
-        match direction {
-            TreeMove::Left => {
-                self.cursor = 0;
-                self.children[0].enter_from(direction);
-            }
-            TreeMove::Right => {
-                self.cursor = self.children.len();
-            }
-            TreeMove::Up | TreeMove::Down => {
-                if let Some(child) = self.active_child_mut() {
-                    child.enter_from(direction);
-                }
-            }
-        }
+    pub fn extend(&mut self, other: Self) {
+        self.children.extend(other.children);
     }
 }
 
 use EditorTreeKind as TK;
 impl EditorTree {
-    pub const FRACTION_LEFT: usize = 2;
-    pub const FRACTION_BOTTOM: usize = 3;
-    pub const FRACTION_TOP: usize = 4;
-
-    pub const POWER_BASE: usize = 0;
-    pub const POWER_POWER: usize = 1;
-
-    pub fn str(content: &str) -> Self {
-        Self::terminal(0, content.to_string())
+    pub fn str(string: &str) -> Self {
+        Self::terminal(0, string.to_string())
     }
 
-    pub fn terminal(cursor: usize, content: String) -> Self {
-        assert!(cursor < content.len());
+    pub fn terminal(cursor: usize, string: String) -> Self {
         Self {
-            cursor,
-            kind: EditorTreeKind::Terminal(content),
+            kind: EditorTreeKind::Terminal(EditorTreeTerminal::new(cursor, string)),
         }
     }
 
-    pub fn power(cursor: usize, base: EditorTreeSeq, power: EditorTreeSeq) -> Self {
-        assert!(cursor == Self::POWER_BASE || cursor == Self::POWER_POWER);
+    pub fn power(cursor: PowerIndex, base: EditorTreeSeq, power: EditorTreeSeq) -> Self {
         Self {
-            cursor,
-            kind: EditorTreeKind::Power { base, power },
+            kind: EditorTreeKind::Power(EditorTreePower::new(cursor, base, power)),
         }
     }
 
-    pub fn fraction(cursor: usize, top: EditorTreeSeq, bottom: EditorTreeSeq) -> Self {
-        assert!(cursor == Self::FRACTION_TOP || cursor == Self::FRACTION_BOTTOM);
+    pub fn fraction(cursor: FractionIndex, top: EditorTreeSeq, bottom: EditorTreeSeq) -> Self {
         Self {
-            cursor,
-            kind: EditorTreeKind::Fraction { top, bottom },
+            kind: EditorTreeKind::Fraction(EditorTreeFraction::new(cursor, top, bottom)),
         }
     }
 
+    pub fn cursor(&self) -> CombinedCursor {
+        match &self.kind {
+            EditorTreeKind::Power(power) => CombinedCursor::Power(power.cursor()),
+            EditorTreeKind::Fraction(fraction) => CombinedCursor::Fraction(fraction.cursor()),
+            EditorTreeKind::Terminal(terminal) => CombinedCursor::Terminal(terminal.cursor()),
+        }
+    }
+
+    pub fn active_child(&self) -> Option<&EditorTreeSeq> {
+        match &self.kind {
+            TK::Terminal(_) => None,
+            TK::Fraction(fraction) => fraction.active_child(),
+            TK::Power(power) => power.active_child(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditorTreeKind {
+    Terminal(EditorTreeTerminal),
+    Fraction(EditorTreeFraction),
+    Power(EditorTreePower),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombinedCursor {
+    Terminal(usize),
+    Fraction(FractionIndex),
+    Power(PowerIndex),
+}
+
+impl CombinedCursor {
+    pub const TOP: Self = Self::Fraction(FractionIndex::Top);
+    pub const BOTTOM: Self = Self::Fraction(FractionIndex::Bottom);
+    pub const LEFT: Self = Self::Fraction(FractionIndex::Left);
+    pub const BASE: Self = Self::Power(PowerIndex::Base);
+    pub const POWER: Self = Self::Power(PowerIndex::Power);
+}
+
+impl From<FractionIndex> for CombinedCursor {
+    fn from(value: FractionIndex) -> Self {
+        Self::Fraction(value)
+    }
+}
+
+impl From<PowerIndex> for CombinedCursor {
+    fn from(value: PowerIndex) -> Self {
+        Self::Power(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeTerminal {
+    cursor: usize,
+    string: String,
+}
+
+impl EditorTreeTerminal {
     pub fn cursor(&self) -> usize {
         self.cursor
     }
 
-    pub fn active_child(&self) -> Option<&EditorTreeSeq> {
-        Some(match &self.kind {
-            TK::Terminal(_) => return None,
-            TK::Fraction { top, bottom } => match self.cursor {
-                Self::FRACTION_BOTTOM => bottom,
-                Self::FRACTION_TOP => top,
-                _ => unreachable!(),
-            },
-            TK::Power { base, power } => match self.cursor {
-                Self::POWER_BASE => base,
-                Self::POWER_POWER => power,
-                _ => unreachable!(),
-            },
-        })
+    pub fn new(cursor: usize, string: String) -> Self {
+        assert!(cursor < string.len());
+        Self { cursor, string }
     }
 
-    pub fn enter_from(&mut self, direction: TreeMove) {
-        match &mut self.kind {
-            TK::Terminal(content) => {
-                self.cursor = match direction {
-                    TreeMove::Left | TreeMove::Up => 0,
-                    TreeMove::Right | TreeMove::Down => content.len() - 1,
-                }
+    pub fn to_byte_cursor(&self, cursor: usize) -> Option<usize> {
+        self.string.char_indices().nth(cursor).map(|x| x.0)
+    }
+
+    pub fn byte_cursor(&self) -> usize {
+        self.to_byte_cursor(self.cursor).unwrap()
+    }
+
+    pub fn char_at(&self) -> char {
+        self.string.chars().nth(self.cursor).unwrap()
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        self.string.insert(self.byte_cursor(), ch);
+        self.cursor += 1;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.string.is_empty()
+    }
+
+    pub fn pop(&mut self) -> Option<char> {
+        self.string.pop()
+    }
+
+    pub fn push(&mut self, ch: char) {
+        self.string.push(ch)
+    }
+
+    /// Returns success.
+    /// - `true` indicates character was successfully removed
+    /// - `false` indicates character wasn't removed
+    pub fn backspace_char(&mut self) -> bool {
+        match self.cursor.checked_sub(1) {
+            Some(leftwards) => {
+                let index = self.to_byte_cursor(leftwards).unwrap();
+                self.string.remove(index);
+                self.cursor -= 1;
+                true
             }
-            TK::Power { base, power } => match direction {
-                TreeMove::Left | TreeMove::Up => {
-                    self.cursor = Self::POWER_BASE;
-                    base.enter_from(direction);
-                }
-                TreeMove::Down | TreeMove::Right => {
-                    self.cursor = Self::POWER_POWER;
-                    power.enter_from(direction);
-                }
-            },
-            TK::Fraction { top, bottom } => match direction {
-                TreeMove::Down | TreeMove::Right => {
-                    self.cursor = Self::FRACTION_BOTTOM;
-                    bottom.enter_from(direction);
-                }
-                TreeMove::Up => {
-                    self.cursor = Self::FRACTION_TOP;
-                    top.enter_from(direction);
-                }
-                TreeMove::Left => {
-                    self.cursor = Self::FRACTION_LEFT;
-                }
-            },
-        }
-    }
-
-    pub fn apply_move(&mut self, movement: TreeMove) -> Option<TreeMove> {
-        match &mut self.kind {
-            TK::Terminal(term) => match movement {
-                TreeMove::Right => {
-                    self.cursor += 1;
-                    (self.cursor >= term.len()).then_some(TreeMove::Right)
-                }
-                TreeMove::Left => {
-                    if self.cursor == 0 {
-                        Some(TreeMove::Left)
-                    } else {
-                        self.cursor -= 1;
-                        None
-                    }
-                }
-                up_or_down => Some(up_or_down),
-            },
-            TK::Power { base, power } => match self.cursor {
-                Self::POWER_BASE => {
-                    let movement = base.apply_move(movement);
-                    match movement {
-                        Some(TreeMove::Up | TreeMove::Right) => {
-                            self.cursor = Self::POWER_POWER;
-                            power.enter_from(TreeMove::Left);
-                            None
-                        }
-                        Some(left_or_down @ (TreeMove::Left | TreeMove::Down)) => {
-                            Some(left_or_down)
-                        }
-                        None => None,
-                    }
-                }
-                Self::POWER_POWER => {
-                    let movement = power.apply_move(movement);
-                    match movement {
-                        Some(TreeMove::Left | TreeMove::Down) => {
-                            self.cursor = Self::POWER_BASE;
-                            base.enter_from(TreeMove::Right);
-                            None
-                        }
-                        Some(up_or_right @ (TreeMove::Up | TreeMove::Right)) => Some(up_or_right),
-                        None => None,
-                    }
-                }
-                _ => unreachable!(),
-            },
-            TK::Fraction { top, bottom } => match self.cursor {
-                Self::FRACTION_BOTTOM => {
-                    let movement = bottom.apply_move(movement);
-                    match movement {
-                        Some(TreeMove::Up) => {
-                            self.cursor = Self::FRACTION_TOP;
-                            top.enter_from(TreeMove::Down);
-                            None
-                        }
-                        Some(TreeMove::Left) => {
-                            self.cursor = Self::FRACTION_LEFT;
-                            None
-                        }
-                        otherwise => otherwise,
-                    }
-                }
-                Self::FRACTION_TOP => {
-                    let movement = top.apply_move(movement);
-                    match movement {
-                        Some(TreeMove::Down) => {
-                            self.cursor = Self::FRACTION_BOTTOM;
-                            bottom.enter_from(TreeMove::Up);
-                            None
-                        }
-                        Some(TreeMove::Left) => {
-                            self.cursor = Self::FRACTION_LEFT;
-                            None
-                        }
-                        otherwise => otherwise,
-                    }
-                }
-                Self::FRACTION_LEFT => match movement {
-                    TreeMove::Right => {
-                        self.cursor = Self::FRACTION_TOP;
-                        top.enter_from(TreeMove::Left);
-                        None
-                    }
-                    otherwise => Some(otherwise),
-                },
-                _ => unreachable!(),
-            },
+            None => false,
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum EditorTreeKind {
-    Terminal(String),
-    Fraction {
-        top: EditorTreeSeq,
-        bottom: EditorTreeSeq,
-    },
-    Power {
-        base: EditorTreeSeq,
-        power: EditorTreeSeq,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TreeMove {
-    Up,
-    Down,
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum FractionIndex {
     Left,
-    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeFraction {
+    cursor: FractionIndex,
+    top: EditorTreeSeq,
+    bottom: EditorTreeSeq,
+}
+
+impl EditorTreeFraction {
+    pub const fn new(cursor: FractionIndex, top: EditorTreeSeq, bottom: EditorTreeSeq) -> Self {
+        Self {
+            cursor,
+            top,
+            bottom,
+        }
+    }
+
+    pub const fn cursor(&self) -> FractionIndex {
+        self.cursor
+    }
+
+    pub const fn active_child(&self) -> Option<&EditorTreeSeq> {
+        match self.cursor {
+            FractionIndex::Left => None,
+            FractionIndex::Top => Some(&self.top),
+            FractionIndex::Bottom => Some(&self.bottom),
+        }
+    }
+
+    pub fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
+        match self.cursor {
+            FractionIndex::Left => None,
+            FractionIndex::Top => Some(&mut self.top),
+            FractionIndex::Bottom => Some(&mut self.bottom),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum PowerIndex {
+    Base,
+    Power,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreePower {
+    cursor: PowerIndex,
+    base: EditorTreeSeq,
+    power: EditorTreeSeq,
+}
+
+impl EditorTreePower {
+    pub const fn new(cursor: PowerIndex, base: EditorTreeSeq, power: EditorTreeSeq) -> Self {
+        Self {
+            cursor,
+            base,
+            power,
+        }
+    }
+
+    pub const fn cursor(&self) -> PowerIndex {
+        self.cursor
+    }
+
+    pub const fn active_child(&self) -> Option<&EditorTreeSeq> {
+        match self.cursor {
+            PowerIndex::Base => Some(&self.base),
+            PowerIndex::Power => Some(&self.power),
+        }
+    }
+
+    pub fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
+        match self.cursor {
+            PowerIndex::Base => Some(&mut self.base),
+            PowerIndex::Power => Some(&mut self.power),
+        }
+    }
 }

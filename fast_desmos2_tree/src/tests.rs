@@ -1,7 +1,15 @@
-use crate::tree::{EditorTree as T, EditorTreeSeq as TS, TreeMove};
+use crate::tree::{
+    CombinedCursor::{self, Terminal as TM},
+    EditorTree as T, EditorTreeSeq as TS, FractionIndex, TreeMovable as _, TreeMove,
+};
+
+const TM0: CombinedCursor = TM(0);
+const TM1: CombinedCursor = TM(1);
+const TOP: CombinedCursor = CombinedCursor::TOP;
+const BOTTOM: CombinedCursor = CombinedCursor::BOTTOM;
 
 macro_rules! assert_cursors {
-    ($tree:ident, $first_cursor:tt $(, $($cursor:tt),*)?) => {
+    ($tree:ident, $first_cursor:expr $(, $($cursor:expr),*)?) => {
         {
             let tree = &$tree;
             #[allow(unused_variables)]
@@ -28,16 +36,16 @@ fn seq_move() {
         ],
     );
 
-    assert_cursors!(tree, 0, 0);
+    assert_cursors!(tree, 0, TM0);
 
     assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 1, 0);
+    assert_cursors!(tree, 1, TM0);
 
     assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 1, 1);
+    assert_cursors!(tree, 1, TM1);
 
     assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 2, 0);
+    assert_cursors!(tree, 2, TM0);
 
     assert_eq!(tree.apply_move(TreeMove::Right), None);
     assert_cursors!(tree, 3);
@@ -59,16 +67,16 @@ fn right_to_left() {
     assert_cursors!(tree, 3);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 2, 0);
+    assert_cursors!(tree, 2, TM0);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 1, 0);
+    assert_cursors!(tree, 1, TM0);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, 0);
+    assert_cursors!(tree, 0, TM0);
 
     assert_eq!(tree.apply_move(TreeMove::Left), Some(TreeMove::Left));
-    assert_cursors!(tree, 0, 0);
+    assert_cursors!(tree, 0, TM0);
 }
 
 #[test]
@@ -78,10 +86,10 @@ fn frac_moves() {
         0,
         vec![
             T::fraction(
-                0, 
+                FractionIndex::Top,
                 TS::one(T::str("H")), 
                 TS::one(T::fraction(
-                    0,
+                    FractionIndex::Top,
                     TS::one(T::str("M")),
                     TS::one(T::str("L"))
                 ))
@@ -89,13 +97,13 @@ fn frac_moves() {
         ],
     );
 
-    assert_cursors!(tree, 0, 0, 0, 0, 0, 0);
+    assert_cursors!(tree, 0, TOP, 0, TOP, 0, TM0);
 
     assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 0, 0, 0, 0, 1);
+    assert_cursors!(tree, 0, TOP, 0, TOP, 1);
 
     assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 0, 0, 1);
+    assert_cursors!(tree, 0, TOP, 1);
 
     assert_eq!(tree.apply_move(TreeMove::Right), None);
     assert_cursors!(tree, 1);
@@ -104,11 +112,11 @@ fn frac_moves() {
     assert_cursors!(tree, 1);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, 0, 1);
+    assert_cursors!(tree, 0, TOP, 1);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, 0, 0, 0, 1);
+    assert_cursors!(tree, 0, TOP, 0, TOP, 1);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, 0, 0, 0, 0, 0);
+    assert_cursors!(tree, 0, TOP, 0, TOP, 0, TM0);
 }

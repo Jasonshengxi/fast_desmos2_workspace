@@ -2,7 +2,10 @@ use std::{fmt::Display, io::Write};
 
 use glam::UVec2;
 
-use super::{EditorTree, EditorTreeKind as TK, EditorTreeSeq};
+use super::{
+    EditorTree, EditorTreeFraction, EditorTreeKind as TK, EditorTreePower, EditorTreeSeq,
+    EditorTreeTerminal, FractionIndex, PowerIndex,
+};
 
 trait RectStyle {
     const LINE_Y: char;
@@ -176,9 +179,13 @@ impl DebugTree {
                 }
             }
             DebugTreeKind::Text(ref string) => {
+                screen.write(offset, '[');
+                let mut len = 0;
                 for (index, char) in string.chars().enumerate() {
-                    screen.write(UVec2::new(index as u32, 0) + offset, char);
+                    screen.write(UVec2::new(index as u32, 0) + UVec2::X + offset, char);
+                    len = index;
                 }
+                screen.write(UVec2::new(len as u32 + 2, 0) + offset, ']');
             }
             DebugTreeKind::BoxAround(style, ref child) => {
                 screen.draw_rect_styled(offset, self.size, style);
@@ -219,7 +226,7 @@ impl DebugTree {
 
     pub fn text(string: String) -> Self {
         Self::new(
-            UVec2::new(string.chars().count() as u32, 1),
+            UVec2::new(string.chars().count() as u32 + 2, 1),
             DebugTreeKind::Text(string),
         )
     }
@@ -257,8 +264,12 @@ impl DebugTree {
     }
 }
 
-impl EditorTreeSeq {
-    pub fn debug(&self, with_cursor: bool) -> DebugTree {
+pub trait Debugable {
+    fn debug(&self, with_cursor: bool) -> DebugTree;
+}
+
+impl Debugable for EditorTreeSeq {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
         let is_cursor_last = self.cursor == self.children.len() && with_cursor;
         let mut nodes = Vec::with_capacity(self.children.len() + is_cursor_last as usize);
 
@@ -267,7 +278,7 @@ impl EditorTreeSeq {
         }
 
         if is_cursor_last {
-            let max_y = nodes.iter().map(|node| node.size.y).max().unwrap();
+            let max_y = nodes.iter().map(|node| node.size.y).max().unwrap_or(1);
             nodes.push(DebugTree::solid(UVec2::new(1, max_y)))
         }
 
@@ -275,32 +286,51 @@ impl EditorTreeSeq {
     }
 }
 
-impl EditorTree {
-    pub fn debug(&self, with_cursor: bool) -> DebugTree {
+impl Debugable for EditorTreeTerminal {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        DebugTree::text(if with_cursor {
+            let mut string = self.string.clone();
+            string.insert(self.byte_cursor(), '█');
+            string
+        } else {
+            self.string.clone()
+        })
+    }
+}
+
+impl Debugable for EditorTreePower {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        DebugTree::horizontal(vec![
+            self.base
+                .debug(with_cursor && self.cursor == PowerIndex::Base),
+            self.power
+                .debug(with_cursor && self.cursor == PowerIndex::Power),
+        ])
+        .boxed(RectStyles::Bold)
+    }
+}
+
+impl Debugable for EditorTreeFraction {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        let mut vec = vec![DebugTree::vertical(vec![
+            self.top
+                .debug(with_cursor && self.cursor == FractionIndex::Top),
+            self.bottom
+                .debug(with_cursor && self.cursor == FractionIndex::Bottom),
+        ])];
+        if with_cursor && self.cursor == FractionIndex::Left {
+            vec.insert(0, DebugTree::solid(UVec2::new(1, vec[0].size.y)));
+        }
+        DebugTree::horizontal(vec).boxed(RectStyles::Bold)
+    }
+}
+
+impl Debugable for EditorTree {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
         match &self.kind {
-            TK::Terminal(string) => DebugTree::text(if with_cursor {
-                let mut string = string.clone();
-                let (index, _) = string.char_indices().nth(self.cursor).unwrap();
-                string.insert(index, '█');
-                string
-            } else {
-                string.clone()
-            }),
-            TK::Power { base, power } => DebugTree::horizontal(vec![
-                base.debug(with_cursor && self.cursor == Self::POWER_BASE),
-                power.debug(with_cursor && self.cursor == Self::POWER_POWER),
-            ])
-            .boxed(RectStyles::Bold),
-            TK::Fraction { top, bottom } => {
-                let mut vec = vec![DebugTree::vertical(vec![
-                    top.debug(with_cursor && self.cursor == Self::FRACTION_TOP),
-                    bottom.debug(with_cursor && self.cursor == Self::FRACTION_BOTTOM),
-                ])];
-                if with_cursor && self.cursor == Self::FRACTION_LEFT {
-                    vec.insert(0, DebugTree::solid(UVec2::new(1, vec[0].size.y)));
-                }
-                DebugTree::horizontal(vec).boxed(RectStyles::Bold)
-            }
+            TK::Terminal(term) => term.debug(with_cursor),
+            TK::Power(power) => power.debug(with_cursor),
+            TK::Fraction(fraction) => fraction.debug(with_cursor),
         }
     }
 }

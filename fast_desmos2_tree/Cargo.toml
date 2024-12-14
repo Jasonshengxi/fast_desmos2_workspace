@@ -14,4 +14,5 @@ termion = ["dep:termion"]
 
 [dependencies]
 glam = "0.29.2"
+take_mut = "0.2.2"
 termion = { version = "4.0.3", optional = true }
