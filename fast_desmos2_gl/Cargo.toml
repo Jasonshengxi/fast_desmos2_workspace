@@ -3,10 +3,21 @@ name = "fast_desmos2_gl"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "fast_desmos2_gl"
+required-features = ["binary"]
+
+[features]
+default = ["binary"]
+binary = ["winit", "color-eyre"]
+winit = []
+color-eyre = ["dep:color-eyre"]
+
 [dependencies]
-color-eyre = "0.6.3"
+color-eyre = { version = "0.6.3", optional = true }
 gl = "0.14.0"
 glam = "0.29.2"
 glfw = "0.58.0"
 
 fast_desmos2_utils = { path = "../fast_desmos2_utils" }
+# winit = { version = "0.30.5", optional = true }

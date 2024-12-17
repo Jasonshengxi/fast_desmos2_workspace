@@ -42,25 +42,24 @@ fn main() -> Result<(), std::io::Error> {
     let mut tree = TS::new(
         0,
         vec![
-            T::str("Text"),
+            T::terminal('T'),
             T::fraction(
                 FractionIndex::Bottom,
                 TS::new(
                     0,
                     vec![
-                        T::str("first"),
-                        T::str("second"),
+                        T::terminal('f'),
                         T::fraction(
                             FractionIndex::Bottom,
-                            TS::one(T::str("A")),
-                            TS::one(T::str("B")),
+                            TS::one(T::terminal('A')),
+                            TS::one(T::terminal('B')),
                         ),
                     ],
                 ),
                 TS::one(T::fraction(
                     FractionIndex::Bottom,
-                    TS::one(T::str("M")),
-                    TS::one(T::str("L")),
+                    TS::one(T::terminal('M')),
+                    TS::one(T::terminal('L')),
                 )),
             ),
         ],

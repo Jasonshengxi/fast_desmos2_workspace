@@ -28,6 +28,17 @@ impl EditorTreeSeq {
         Self { cursor, children }
     }
 
+    pub fn str(string: &str) -> Self {
+        Self::new(
+            0,
+            string.chars().map(|ch| EditorTree::terminal(ch)).collect(),
+        )
+    }
+
+    pub fn empty() -> Self {
+        Self::new(0, Vec::new())
+    }
+
     pub fn one(child: EditorTree) -> Self {
         Self::new(0, vec![child])
     }
@@ -53,15 +64,16 @@ impl EditorTreeSeq {
     }
 }
 
-use EditorTreeKind as TK;
 impl EditorTree {
-    pub fn str(string: &str) -> Self {
-        Self::terminal(0, string.to_string())
+    pub fn terminal(ch: char) -> Self {
+        Self {
+            kind: EditorTreeKind::Terminal(EditorTreeTerminal::new(ch)),
+        }
     }
 
-    pub fn terminal(cursor: usize, string: String) -> Self {
+    pub fn paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
         Self {
-            kind: EditorTreeKind::Terminal(EditorTreeTerminal::new(cursor, string)),
+            kind: EditorTreeKind::Paren(EditorTreeParen::new(cursor, child)),
         }
     }
 
@@ -81,15 +93,19 @@ impl EditorTree {
         match &self.kind {
             EditorTreeKind::Power(power) => CombinedCursor::Power(power.cursor()),
             EditorTreeKind::Fraction(fraction) => CombinedCursor::Fraction(fraction.cursor()),
-            EditorTreeKind::Terminal(terminal) => CombinedCursor::Terminal(terminal.cursor()),
+            EditorTreeKind::Terminal(_) => CombinedCursor::Terminal,
+            EditorTreeKind::Sqrt(sqrt) => CombinedCursor::Sqrt(sqrt.cursor()),
+            EditorTreeKind::Paren(paren) => CombinedCursor::Paren(paren.cursor()),
         }
     }
 
     pub fn active_child(&self) -> Option<&EditorTreeSeq> {
         match &self.kind {
-            TK::Terminal(_) => None,
-            TK::Fraction(fraction) => fraction.active_child(),
-            TK::Power(power) => power.active_child(),
+            EditorTreeKind::Terminal(_) => None,
+            EditorTreeKind::Fraction(fraction) => fraction.active_child(),
+            EditorTreeKind::Power(power) => power.active_child(),
+            EditorTreeKind::Sqrt(sqrt) => sqrt.active_child(),
+            EditorTreeKind::Paren(paren) => paren.active_child(),
         }
     }
 }
@@ -99,13 +115,17 @@ pub enum EditorTreeKind {
     Terminal(EditorTreeTerminal),
     Fraction(EditorTreeFraction),
     Power(EditorTreePower),
+    Sqrt(EditorTreeSqrt),
+    Paren(EditorTreeParen),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CombinedCursor {
-    Terminal(usize),
     Fraction(FractionIndex),
     Power(PowerIndex),
+    Terminal,
+    Sqrt(SurroundIndex),
+    Paren(SurroundIndex),
 }
 
 impl CombinedCursor {
@@ -128,64 +148,75 @@ impl From<PowerIndex> for CombinedCursor {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum SurroundIndex {
+    Left,
+    Inside,
+}
+
+trait SurroundsTreeSeq {
+    fn cursor(&self) -> SurroundIndex;
+    fn cursor_mut(&mut self) -> &mut SurroundIndex;
+    fn child(&self) -> &EditorTreeSeq;
+    fn child_mut(&mut self) -> &mut EditorTreeSeq;
+
+    fn active_child(&self) -> Option<&EditorTreeSeq> {
+        (self.cursor() == SurroundIndex::Inside).then_some(self.child())
+    }
+    fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
+        (self.cursor() == SurroundIndex::Inside).then_some(self.child_mut())
+    }
+    fn set_cursor(&mut self, cursor: SurroundIndex) {
+        *self.cursor_mut() = cursor;
+    }
+}
+
+macro_rules! impl_surrounds_tree_seq {
+    ($name: ident) => {
+        impl SurroundsTreeSeq for $name {
+            fn child(&self) -> &EditorTreeSeq {
+                &self.child
+            }
+            fn child_mut(&mut self) -> &mut EditorTreeSeq {
+                &mut self.child
+            }
+            fn cursor(&self) -> SurroundIndex {
+                self.cursor
+            }
+            fn cursor_mut(&mut self) -> &mut SurroundIndex {
+                &mut self.cursor
+            }
+        }
+    };
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeSqrt {
+    cursor: SurroundIndex,
+    child: EditorTreeSeq,
+}
+impl_surrounds_tree_seq!(EditorTreeSqrt);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeParen {
+    cursor: SurroundIndex,
+    child: EditorTreeSeq,
+}
+impl_surrounds_tree_seq!(EditorTreeParen);
+impl EditorTreeParen {
+    pub fn new(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self { cursor, child }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeTerminal {
-    cursor: usize,
-    string: String,
+    ch: char,
 }
 
 impl EditorTreeTerminal {
-    pub fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    pub fn new(cursor: usize, string: String) -> Self {
-        assert!(cursor < string.len());
-        Self { cursor, string }
-    }
-
-    pub fn to_byte_cursor(&self, cursor: usize) -> Option<usize> {
-        self.string.char_indices().nth(cursor).map(|x| x.0)
-    }
-
-    pub fn byte_cursor(&self) -> usize {
-        self.to_byte_cursor(self.cursor).unwrap()
-    }
-
-    pub fn char_at(&self) -> char {
-        self.string.chars().nth(self.cursor).unwrap()
-    }
-
-    pub fn insert_char(&mut self, ch: char) {
-        self.string.insert(self.byte_cursor(), ch);
-        self.cursor += 1;
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.string.is_empty()
-    }
-
-    pub fn pop(&mut self) -> Option<char> {
-        self.string.pop()
-    }
-
-    pub fn push(&mut self, ch: char) {
-        self.string.push(ch)
-    }
-
-    /// Returns success.
-    /// - `true` indicates character was successfully removed
-    /// - `false` indicates character wasn't removed
-    pub fn backspace_char(&mut self) -> bool {
-        match self.cursor.checked_sub(1) {
-            Some(leftwards) => {
-                let index = self.to_byte_cursor(leftwards).unwrap();
-                self.string.remove(index);
-                self.cursor -= 1;
-                true
-            }
-            None => false,
-        }
+    pub fn new(ch: char) -> Self {
+        Self { ch }
     }
 }
 
@@ -214,6 +245,14 @@ impl EditorTreeFraction {
 
     pub const fn cursor(&self) -> FractionIndex {
         self.cursor
+    }
+
+    pub const fn top(&self) -> &EditorTreeSeq {
+        &self.top
+    }
+
+    pub const fn bottom(&self) -> &EditorTreeSeq {
+        &self.bottom
     }
 
     pub const fn active_child(&self) -> Option<&EditorTreeSeq> {
@@ -257,6 +296,14 @@ impl EditorTreePower {
 
     pub const fn cursor(&self) -> PowerIndex {
         self.cursor
+    }
+
+    pub const fn base(&self) -> &EditorTreeSeq {
+        &self.base
+    }
+
+    pub const fn power(&self) -> &EditorTreeSeq {
+        &self.power
     }
 
     pub const fn active_child(&self) -> Option<&EditorTreeSeq> {

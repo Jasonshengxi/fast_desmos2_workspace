@@ -1,0 +1,9 @@
+[package]
+name = "fast_desmos2_tree_parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "2.6.0"
+elsa = "1.10.0"
+fast_desmos2_tree = { path = "../fast_desmos2_tree" }

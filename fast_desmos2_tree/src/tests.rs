@@ -3,8 +3,6 @@ use crate::tree::{
     EditorTree as T, EditorTreeSeq as TS, FractionIndex, TreeMovable as _, TreeMove,
 };
 
-const TM0: CombinedCursor = TM(0);
-const TM1: CombinedCursor = TM(1);
 const TOP: CombinedCursor = CombinedCursor::TOP;
 const BOTTOM: CombinedCursor = CombinedCursor::BOTTOM;
 
@@ -26,97 +24,23 @@ macro_rules! assert_cursors {
 }
 
 #[test]
-fn seq_move() {
-    let mut tree = TS::new(
-        0,
-        vec![
-            T::terminal(0, "1".to_string()),
-            T::terminal(0, "23".to_string()),
-            T::terminal(0, "3".to_string()),
-        ],
-    );
-
-    assert_cursors!(tree, 0, TM0);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 1, TM0);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 1, TM1);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 2, TM0);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 3);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), Some(TreeMove::Right));
-}
-
-#[test]
 fn right_to_left() {
     let mut tree = TS::new(
         3,
-        vec![
-            T::terminal(0, "1".to_string()),
-            T::terminal(0, "2".to_string()),
-            T::terminal(0, "3".to_string()),
-        ],
+        vec![T::terminal('1'), T::terminal('2'), T::terminal('3')],
     );
 
     assert_cursors!(tree, 3);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 2, TM0);
+    assert_cursors!(tree, 2, TM);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 1, TM0);
+    assert_cursors!(tree, 1, TM);
 
     assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, TM0);
+    assert_cursors!(tree, 0, TM);
 
     assert_eq!(tree.apply_move(TreeMove::Left), Some(TreeMove::Left));
-    assert_cursors!(tree, 0, TM0);
-}
-
-#[test]
-fn frac_moves() {
-    #[rustfmt::skip]
-    let mut tree = TS::new(
-        0,
-        vec![
-            T::fraction(
-                FractionIndex::Top,
-                TS::one(T::str("H")), 
-                TS::one(T::fraction(
-                    FractionIndex::Top,
-                    TS::one(T::str("M")),
-                    TS::one(T::str("L"))
-                ))
-            ),
-        ],
-    );
-
-    assert_cursors!(tree, 0, TOP, 0, TOP, 0, TM0);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 0, TOP, 0, TOP, 1);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 0, TOP, 1);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), None);
-    assert_cursors!(tree, 1);
-
-    assert_eq!(tree.apply_move(TreeMove::Right), Some(TreeMove::Right));
-    assert_cursors!(tree, 1);
-
-    assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, TOP, 1);
-
-    assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, TOP, 0, TOP, 1);
-
-    assert_eq!(tree.apply_move(TreeMove::Left), None);
-    assert_cursors!(tree, 0, TOP, 0, TOP, 0, TM0);
+    assert_cursors!(tree, 0, TM);
 }

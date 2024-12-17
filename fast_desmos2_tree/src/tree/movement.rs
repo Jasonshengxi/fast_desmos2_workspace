@@ -1,6 +1,7 @@
 use super::{
-    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreePower, EditorTreeSeq,
-    EditorTreeTerminal, FractionIndex, PowerIndex,
+    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreePower,
+    EditorTreeSeq, EditorTreeTerminal, FractionIndex, PowerIndex, SurroundIndex,
+    SurroundsTreeSeq,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +54,9 @@ impl TreeMovable for EditorTreeSeq {
         match direction {
             TreeMove::Left => {
                 self.cursor = 0;
-                self.children[0].enter_from(direction);
+                if let Some(first) = self.children.first_mut() {
+                    first.enter_from(direction);
+                }
             }
             TreeMove::Right => {
                 self.cursor = self.children.len();
@@ -69,29 +72,10 @@ impl TreeMovable for EditorTreeSeq {
 
 impl TreeMovable for EditorTreeTerminal {
     fn apply_move(&mut self, movement: TreeMove) -> Option<TreeMove> {
-        match movement {
-            TreeMove::Right => {
-                self.cursor += 1;
-                (self.cursor >= self.string.len()).then_some(TreeMove::Right)
-            }
-            TreeMove::Left => {
-                if self.cursor == 0 {
-                    Some(TreeMove::Left)
-                } else {
-                    self.cursor -= 1;
-                    None
-                }
-            }
-            up_or_down => Some(up_or_down),
-        }
+        Some(movement)
     }
 
-    fn enter_from(&mut self, direction: TreeMove) {
-        self.cursor = match direction {
-            TreeMove::Left | TreeMove::Up => 0,
-            TreeMove::Right | TreeMove::Down => self.string.len() - 1,
-        }
-    }
+    fn enter_from(&mut self, _direction: TreeMove) {}
 }
 impl TreeMovable for EditorTreePower {
     fn apply_move(&mut self, movement: TreeMove) -> Option<TreeMove> {
@@ -197,12 +181,49 @@ impl TreeMovable for EditorTreeFraction {
     }
 }
 
+impl<T: SurroundsTreeSeq> TreeMovable for T {
+    fn apply_move(&mut self, movement: TreeMove) -> Option<TreeMove> {
+        match self.cursor() {
+            SurroundIndex::Left => match movement {
+                TreeMove::Right => {
+                    self.set_cursor(SurroundIndex::Inside);
+                    self.child_mut().enter_from(TreeMove::Left);
+                    None
+                }
+                TreeMove::Left | TreeMove::Up | TreeMove::Down => Some(movement),
+            },
+            SurroundIndex::Inside => {
+                let outcome = self.child_mut().apply_move(movement);
+                match outcome {
+                    Some(TreeMove::Left) => {
+                        self.set_cursor(SurroundIndex::Left);
+                        None
+                    }
+                    None | Some(TreeMove::Down | TreeMove::Up | TreeMove::Right) => outcome,
+                }
+            }
+        }
+    }
+
+    fn enter_from(&mut self, direction: TreeMove) {
+        match direction {
+            TreeMove::Left | TreeMove::Up => self.set_cursor(SurroundIndex::Left),
+            TreeMove::Right | TreeMove::Down => {
+                self.set_cursor(SurroundIndex::Inside);
+                self.child_mut().enter_from(direction);
+            }
+        }
+    }
+}
+
 impl TreeMovable for EditorTree {
     fn enter_from(&mut self, direction: TreeMove) {
         match &mut self.kind {
             EditorTreeKind::Terminal(term) => term.enter_from(direction),
             EditorTreeKind::Power(power) => power.enter_from(direction),
             EditorTreeKind::Fraction(fraction) => fraction.enter_from(direction),
+            EditorTreeKind::Sqrt(sqrt) => sqrt.enter_from(direction),
+            EditorTreeKind::Paren(paren) => paren.enter_from(direction),
         }
     }
 
@@ -211,6 +232,8 @@ impl TreeMovable for EditorTree {
             EditorTreeKind::Terminal(term) => term.apply_move(movement),
             EditorTreeKind::Power(power) => power.apply_move(movement),
             EditorTreeKind::Fraction(fraction) => fraction.apply_move(movement),
+            EditorTreeKind::Sqrt(sqrt) => sqrt.apply_move(movement),
+            EditorTreeKind::Paren(paren) => paren.apply_move(movement),
         }
     }
 }

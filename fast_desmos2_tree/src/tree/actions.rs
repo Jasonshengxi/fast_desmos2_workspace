@@ -2,13 +2,14 @@ use std::cmp::Ordering;
 
 use crate::tree::{EditorTreeFraction, EditorTreeKind, FractionIndex};
 
-use super::{EditorTree, EditorTreeSeq, PowerIndex, TreeMovable, TreeMove};
+use super::{EditorTree, EditorTreeSeq, PowerIndex, SurroundIndex, TreeMovable, TreeMove};
 
 #[derive(Debug, Clone, Copy)]
 pub enum TreeAction {
     Char(char),
     MakeFraction,
     MakePower,
+    MakeParen,
     Delete,
 }
 
@@ -17,6 +18,7 @@ impl TreeAction {
         match char {
             '/' => Self::MakeFraction,
             '^' => Self::MakePower,
+            '(' => Self::MakeParen,
             otherwise => Self::Char(otherwise),
         }
     }
@@ -32,11 +34,17 @@ pub enum SeqActionOutcome {
 pub enum ActionOutcome {
     LeftOverflow,
     Deleted,
+    CaptureCursor,
+    Delegated,
     LeftNode(EditorTree),
-    Replaced2 {
+    RightNode(EditorTree),
+    Splice2 {
         first: Vec<EditorTree>,
         second: Vec<EditorTree>,
         put_cursor_first: bool,
+    },
+    Splice {
+        children: Vec<EditorTree>,
     },
 }
 
@@ -54,7 +62,17 @@ impl EditorTreeSeq {
             if let Some(last_index) = self.children.len().checked_sub(1) {
                 self.apply_action_internal(last_index, action, HereOrRight::Right)
             } else {
-                Some(SeqActionOutcome::LeftOverflow)
+                match action {
+                    TreeAction::Char(ch) => {
+                        self.children.push(EditorTree::terminal(ch));
+                        self.cursor = 1;
+                        None
+                    }
+                    TreeAction::MakeFraction | TreeAction::MakePower | TreeAction::Delete => {
+                        Some(SeqActionOutcome::LeftOverflow)
+                    }
+                    TreeAction::MakeParen => todo!(),
+                }
             }
         }
     }
@@ -90,35 +108,91 @@ impl EditorTreeSeq {
                     Ordering::Less => self.cursor -= 1,
                     Ordering::Greater => {}
                 }
+
+                if self.children.is_empty() {
+                    return Some(SeqActionOutcome::Deleted);
+                }
             }
-            Some(ActionOutcome::Replaced2 {
+            Some(ActionOutcome::Splice2 {
                 first,
                 second,
                 put_cursor_first,
             }) => {
                 let first_len = first.len();
+                let second_len = second.len();
                 self.children.splice(index..=index, second);
                 self.children.splice(index..index, first);
-                if index == self.cursor() {
-                    if put_cursor_first {
-                        self.children[index].enter_from(TreeMove::Left);
-                    } else {
-                        self.cursor += first_len;
-                        self.children[self.cursor].enter_from(TreeMove::Left);
+                match index.cmp(&self.cursor) {
+                    Ordering::Equal => {
+                        if put_cursor_first {
+                            self.children[index].enter_from(TreeMove::Left);
+                        } else {
+                            self.cursor += first_len;
+                            self.children[self.cursor].enter_from(TreeMove::Left);
+                        }
                     }
+                    Ordering::Less => self.cursor += first_len + second_len - 1,
+                    Ordering::Greater => {}
+                }
+            }
+            Some(ActionOutcome::Splice { children }) => {
+                let len = children.len();
+                self.children.splice(index..=index, children);
+                match index.cmp(&self.cursor) {
+                    Ordering::Equal => self.children[index].enter_from(TreeMove::Left),
+                    Ordering::Less => self.cursor += len - 1,
+                    Ordering::Greater => {}
                 }
             }
             Some(ActionOutcome::LeftNode(node)) => {
                 self.children.insert(index, node);
-                if index == self.cursor() {
-                    self.cursor += 1;
-                    self.children[self.cursor].enter_from(TreeMove::Left);
+                match index.cmp(&self.cursor) {
+                    Ordering::Equal => {
+                        self.cursor += 1;
+                        self.children[self.cursor].enter_from(TreeMove::Left);
+                    }
+                    Ordering::Less => self.cursor += 1,
+                    Ordering::Greater => {}
                 }
             }
+            Some(ActionOutcome::RightNode(node)) => {
+                self.children.insert(index + 1, node);
+                match index.cmp(&self.cursor) {
+                    Ordering::Equal => {
+                        self.cursor += 1;
+                        self.children[self.cursor].enter_from(TreeMove::Left);
+                    }
+                    Ordering::Less => self.cursor += 1,
+                    Ordering::Greater => {}
+                }
+            }
+            Some(ActionOutcome::Delegated) => match action {
+                TreeAction::Char(_) | TreeAction::Delete => unreachable!(),
+                TreeAction::MakeFraction => todo!(),
+                TreeAction::MakePower => todo!(),
+                TreeAction::MakeParen => {
+                    let useful = self.children.drain(index..).collect::<Vec<_>>();
+                    let new_child =
+                        EditorTree::paren(SurroundIndex::Inside, EditorTreeSeq::new(0, useful));
+                    self.children.push(new_child);
+                }
+            },
+            Some(ActionOutcome::CaptureCursor) => self.cursor = index,
             None => {}
         }
-
         None
+    }
+
+    pub fn search_back(&self, index: usize) -> usize {
+        let first = &self.children[index];
+        match first.kind {
+            EditorTreeKind::Fraction(_) => {}
+            EditorTreeKind::Terminal(_) => {}
+            EditorTreeKind::Power(_) => {}
+            EditorTreeKind::Paren(_) => {}
+            EditorTreeKind::Sqrt(_) => {}
+        }
+        todo!()
     }
 
     pub fn apply_action_from_right(&mut self, action: TreeAction) -> Option<SeqActionOutcome> {
@@ -133,20 +207,12 @@ impl EditorTreeSeq {
 impl EditorTree {
     pub fn apply_action(&mut self, action: TreeAction) -> Option<ActionOutcome> {
         match &mut self.kind {
-            EditorTreeKind::Terminal(term) => match action {
-                TreeAction::Char(c) => {
-                    term.insert_char(c);
-                    None
+            EditorTreeKind::Terminal(_) => match action {
+                TreeAction::Char(c) => Some(ActionOutcome::LeftNode(EditorTree::terminal(c))),
+                TreeAction::Delete => Some(ActionOutcome::LeftOverflow),
+                TreeAction::MakePower | TreeAction::MakeFraction | TreeAction::MakeParen => {
+                    Some(ActionOutcome::Delegated)
                 }
-                TreeAction::Delete => {
-                    let success = term.backspace_char();
-                    match success {
-                        true => term.is_empty().then_some(ActionOutcome::Deleted),
-                        false => Some(ActionOutcome::LeftOverflow),
-                    }
-                }
-                TreeAction::MakePower => todo!(),
-                TreeAction::MakeFraction => todo!(),
             },
             EditorTreeKind::Fraction(fraction) => match fraction.cursor() {
                 FractionIndex::Top => {
@@ -155,12 +221,7 @@ impl EditorTree {
                         None => None,
                         Some(SeqActionOutcome::LeftOverflow) => match action {
                             TreeAction::Delete => {
-                                let old_self = std::mem::replace(
-                                    self,
-                                    EditorTree::str(
-                                        "[ERR]: Replaced2 wasn't implemented correctly.",
-                                    ),
-                                );
+                                let old_self = std::mem::replace(self, EditorTree::terminal('X'));
                                 let EditorTreeKind::Fraction(EditorTreeFraction {
                                     cursor: _,
                                     top,
@@ -169,7 +230,7 @@ impl EditorTree {
                                 else {
                                     unreachable!()
                                 };
-                                Some(ActionOutcome::Replaced2 {
+                                Some(ActionOutcome::Splice2 {
                                     first: top.children,
                                     second: bottom.children,
                                     put_cursor_first: true,
@@ -177,7 +238,7 @@ impl EditorTree {
                             }
                             _ => Some(ActionOutcome::LeftOverflow),
                         },
-                        Some(SeqActionOutcome::Deleted) => todo!("Replace with placeholder"),
+                        Some(SeqActionOutcome::Deleted) => None, // Keep node alive
                     }
                 }
                 FractionIndex::Bottom => {
@@ -186,12 +247,7 @@ impl EditorTree {
                         None => None,
                         Some(SeqActionOutcome::LeftOverflow) => match action {
                             TreeAction::Delete => {
-                                let old_self = std::mem::replace(
-                                    self,
-                                    EditorTree::str(
-                                        "[ERR]: Replaced2 wasn't implemented correctly.",
-                                    ),
-                                );
+                                let old_self = std::mem::replace(self, EditorTree::terminal('X'));
                                 let EditorTreeKind::Fraction(EditorTreeFraction {
                                     cursor: _,
                                     top,
@@ -200,7 +256,7 @@ impl EditorTree {
                                 else {
                                     unreachable!()
                                 };
-                                Some(ActionOutcome::Replaced2 {
+                                Some(ActionOutcome::Splice2 {
                                     first: top.children,
                                     second: bottom.children,
                                     put_cursor_first: false,
@@ -208,7 +264,7 @@ impl EditorTree {
                             }
                             _ => Some(ActionOutcome::LeftOverflow),
                         },
-                        Some(SeqActionOutcome::Deleted) => todo!("Replace with placeholder"),
+                        Some(SeqActionOutcome::Deleted) => None, // keep node alive
                     }
                 }
                 FractionIndex::Left => Some(ActionOutcome::LeftOverflow),
@@ -222,6 +278,7 @@ impl EditorTree {
                             TreeAction::Char(_) => unreachable!(),
                             TreeAction::MakeFraction => todo!(),
                             TreeAction::MakePower => todo!(),
+                            TreeAction::MakeParen => todo!(),
                             TreeAction::Delete => todo!(),
                         },
                         Some(SeqActionOutcome::Deleted) => todo!("Remove and flatten"),
@@ -238,21 +295,56 @@ impl EditorTree {
                     }
                 }
             },
+            EditorTreeKind::Sqrt(_) => todo!(),
+            EditorTreeKind::Paren(paren) => match paren.cursor {
+                SurroundIndex::Left => todo!(),
+                SurroundIndex::Inside => {
+                    let outcome = paren.child.apply_action(action);
+                    match outcome {
+                        Some(SeqActionOutcome::LeftOverflow) => match action {
+                            TreeAction::Char(_) => unreachable!("LeftOverflow on Char"),
+                            TreeAction::MakeFraction => None,
+                            TreeAction::MakePower => None,
+                            TreeAction::MakeParen => unreachable!("LeftOverflow on Paren"),
+                            TreeAction::Delete => {
+                                let old_self = std::mem::replace(self, EditorTree::terminal('X'));
+                                let EditorTreeKind::Paren(paren) = old_self.kind else {
+                                    unreachable!()
+                                };
+                                let children = paren.child.children;
+                                Some(ActionOutcome::Splice { children })
+                            }
+                        },
+                        Some(SeqActionOutcome::Deleted) => None,
+                        None => None,
+                    }
+                }
+            },
         }
     }
 
     pub fn apply_action_from_right(&mut self, action: TreeAction) -> Option<ActionOutcome> {
         match &mut self.kind {
-            EditorTreeKind::Terminal(term) => match action {
-                TreeAction::Delete => match term.pop() {
-                    Some(_) => return (term.is_empty()).then_some(ActionOutcome::Deleted),
-                    None => return Some(ActionOutcome::LeftOverflow),
-                },
-                TreeAction::Char(c) => term.push(c),
-                _ => todo!(),
+            EditorTreeKind::Terminal(_) => match action {
+                TreeAction::Delete => Some(ActionOutcome::Deleted),
+                TreeAction::Char(ch) => Some(ActionOutcome::RightNode(EditorTree::terminal(ch))),
+                TreeAction::MakeFraction => Some(ActionOutcome::Delegated),
+                TreeAction::MakePower => Some(ActionOutcome::Delegated),
+                TreeAction::MakeParen => Some(ActionOutcome::Delegated),
             },
-            _ => todo!(),
+            EditorTreeKind::Fraction(fraction) => match action {
+                TreeAction::Char(ch) => Some(ActionOutcome::RightNode(EditorTree::terminal(ch))),
+                TreeAction::Delete => {
+                    fraction.enter_from(TreeMove::Right);
+                    Some(ActionOutcome::CaptureCursor)
+                }
+                TreeAction::MakeFraction => todo!(),
+                TreeAction::MakePower => todo!(),
+                TreeAction::MakeParen => todo!(),
+            },
+            EditorTreeKind::Power(_) => todo!(),
+            EditorTreeKind::Sqrt(_) => todo!(),
+            EditorTreeKind::Paren(_) => todo!(),
         }
-        None
     }
 }
