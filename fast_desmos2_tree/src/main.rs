@@ -1,6 +1,6 @@
 use fast_desmos2_tree::tree::{
-    debug::Debugable as _, EditorTree as T, EditorTreeSeq as TS, FractionIndex, TreeAction,
-    TreeMovable, TreeMove,
+    debug::Debugable as _, Direction, EditorTree as T, EditorTreeSeq as TS, FractionIndex, Motion,
+    TreeAction, TreeMovable,
 };
 use glam::UVec2;
 use std::{
@@ -86,20 +86,24 @@ fn main() -> Result<(), std::io::Error> {
             tree.apply_action(action);
         }
 
-        fn apply_move(tree: &mut TS, movement: TreeMove) {
+        fn apply_move(tree: &mut TS, movement: Motion) {
             tree.apply_move(movement);
         }
 
         let t = &mut tree;
         match mode {
             EditorMode::Normal => match key {
-                Key::Char('h') => apply_move(t, TreeMove::Left),
-                Key::Char('j') => apply_move(t, TreeMove::Down),
-                Key::Char('k') => apply_move(t, TreeMove::Up),
-                Key::Char('l') => apply_move(t, TreeMove::Right),
+                Key::Char('h') => apply_move(t, Motion::Left),
+                Key::Char('j') => apply_move(t, Motion::Down),
+                Key::Char('k') => apply_move(t, Motion::Up),
+                Key::Char('l') => apply_move(t, Motion::Right),
 
-                Key::Char('$') => t.enter_from(TreeMove::Right),
-                Key::Char('^' | '0') => t.enter_from(TreeMove::Left),
+                Key::Char('w') => apply_move(t, Motion::Word),
+                Key::Char('b') => apply_move(t, Motion::Back),
+                Key::Char('$') => apply_move(t, Motion::Last),
+                Key::Char('^') => apply_move(t, Motion::First),
+
+                Key::Char('0') => t.enter_from(Direction::Left),
 
                 Key::Char('i') => mode = EditorMode::Insert,
                 // Key::Char('x') => apply_action(tree, TreeAction::Delete),
@@ -111,10 +115,10 @@ fn main() -> Result<(), std::io::Error> {
                 Key::Backspace => apply_action(t, TreeAction::Delete),
                 Key::Char(c) => apply_action(t, TreeAction::from_char(c)),
 
-                Key::Left => apply_move(t, TreeMove::Left),
-                Key::Down => apply_move(t, TreeMove::Down),
-                Key::Up => apply_move(t, TreeMove::Up),
-                Key::Right => apply_move(t, TreeMove::Right),
+                Key::Left => apply_move(t, Motion::Left),
+                Key::Down => apply_move(t, Motion::Down),
+                Key::Up => apply_move(t, Motion::Up),
+                Key::Right => apply_move(t, Motion::Right),
                 _ => {}
             },
         }

@@ -15,4 +15,7 @@ termion = ["dep:termion"]
 [dependencies]
 glam = "0.29.2"
 take_mut = "0.2.2"
+thiserror = "2.0.8"
 termion = { version = "4.0.3", optional = true }
+
+fast_desmos2_utils = { path = "../fast_desmos2_utils" }

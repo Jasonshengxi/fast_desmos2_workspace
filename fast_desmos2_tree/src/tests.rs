@@ -1,6 +1,6 @@
 use crate::tree::{
     CombinedCursor::{self, Terminal as TM},
-    EditorTree as T, EditorTreeSeq as TS, FractionIndex, TreeMovable as _, TreeMove,
+    EditorTree as T, EditorTreeSeq as TS, FractionIndex, Motion, TreeMovable as _,
 };
 
 const TOP: CombinedCursor = CombinedCursor::TOP;
@@ -32,15 +32,15 @@ fn right_to_left() {
 
     assert_cursors!(tree, 3);
 
-    assert_eq!(tree.apply_move(TreeMove::Left), None);
+    assert_eq!(tree.apply_move(Motion::Left), None);
     assert_cursors!(tree, 2, TM);
 
-    assert_eq!(tree.apply_move(TreeMove::Left), None);
+    assert_eq!(tree.apply_move(Motion::Left), None);
     assert_cursors!(tree, 1, TM);
 
-    assert_eq!(tree.apply_move(TreeMove::Left), None);
+    assert_eq!(tree.apply_move(Motion::Left), None);
     assert_cursors!(tree, 0, TM);
 
-    assert_eq!(tree.apply_move(TreeMove::Left), Some(TreeMove::Left));
+    assert_eq!(tree.apply_move(Motion::Left), Some(Motion::Left));
     assert_cursors!(tree, 0, TM);
 }

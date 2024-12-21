@@ -2,9 +2,12 @@ use std::{fmt::Display, io::Write};
 
 use glam::UVec2;
 
+use crate::tree::SumProdIndex;
+
 use super::{
-    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreePower,
-    EditorTreeSeq, EditorTreeTerminal, FractionIndex, PowerIndex, SurroundIndex, SurroundsTreeSeq,
+    EditableIdent, EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen,
+    EditorTreePower, EditorTreeSeq, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal,
+    FractionIndex, SurroundIndex, SurroundsTreeSeq,
 };
 
 trait RectStyle {
@@ -172,7 +175,12 @@ pub enum DebugTreeKind {
     Char(char),
     TwoChar([char; 2]),
     Text(String),
-    Brackets(RectStyles, Box<DebugTree>),
+    SqrtShape(RectStyles, Box<DebugTree>),
+    Brackets {
+        left: RectStyles,
+        right: RectStyles,
+        child: Box<DebugTree>,
+    },
     BoxAround(RectStyles, Box<DebugTree>),
     Children(Vec<DebugTree>),
 }
@@ -213,23 +221,46 @@ impl DebugTree {
                 screen.draw_rect_styled(offset, self.size, style);
                 child.render_to(screen, offset + child.offset);
             }
-            DebugTreeKind::Brackets(style, ref child) => {
+            DebugTreeKind::SqrtShape(style, ref child) => {
                 child.render_to(screen, offset + child.offset);
 
+                let outer = offset + self.size - 1;
+                for x in (offset.x + 1)..=(outer.x - 1) {
+                    screen.write(offset.with_x(x), style_get!(style::LINE_Y));
+                }
+                for y in (offset.y + 1)..=(outer.y - 1) {
+                    screen.write(offset.with_y(y), style_get!(style::LINE_X));
+                }
+                screen.write(offset, style_get!(style::CORNER_UL));
+            }
+            DebugTreeKind::Brackets {
+                left,
+                right,
+                ref child,
+            } => {
+                child.render_to(screen, offset + child.offset);
+
+                let outer = offset + self.size - 1;
                 if self.size.y == 1 {
-                    let outer = offset + self.size - 1;
-                    screen.write(offset, '[');
-                    screen.write(outer, ']');
+                    screen.write(offset, match left {
+                        RectStyles::Normal => todo!(),
+                        RectStyles::Bold => '[',
+                        RectStyles::Weak => '(',
+                    });
+                    screen.write(outer, match right {
+                        RectStyles::Normal => todo!(),
+                        RectStyles::Bold => ']',
+                        RectStyles::Weak => ')',
+                    });
                 } else {
-                    let outer = offset + self.size - 1;
                     for y in (offset.y + 1)..=(outer.y - 1) {
-                        screen.write(offset.with_y(y), style_get!(style::LINE_Y));
-                        screen.write(outer.with_y(y), style_get!(style::LINE_Y));
+                        screen.write(offset.with_y(y), style_get!(left::LINE_Y));
+                        screen.write(outer.with_y(y), style_get!(right::LINE_Y));
                     }
-                    screen.write(offset, style_get!(style::CORNER_UL));
-                    screen.write(offset.with_x(outer.x), style_get!(style::CORNER_UR));
-                    screen.write(offset.with_y(outer.y), style_get!(style::CORNER_DL));
-                    screen.write(outer, style_get!(style::CORNER_DR));
+                    screen.write(offset, style_get!(left::CORNER_UL));
+                    screen.write(offset.with_y(outer.y), style_get!(left::CORNER_DL));
+                    screen.write(outer, style_get!(right::CORNER_DR));
+                    screen.write(offset.with_x(outer.x), style_get!(right::CORNER_UR));
                 }
             }
             DebugTreeKind::Empty => {}
@@ -262,11 +293,23 @@ impl DebugTree {
         )
     }
 
-    pub fn bracketed(mut self, style: RectStyles) -> Self {
+    pub fn bracketed(mut self, left: RectStyles, right: RectStyles) -> Self {
         self.offset += UVec2::X;
         Self::new(
             self.size + UVec2::new(2, 0),
-            DebugTreeKind::Brackets(style, Box::new(self)),
+            DebugTreeKind::Brackets {
+                left,
+                right,
+                child: Box::new(self),
+            },
+        )
+    }
+
+    pub fn sqrt(mut self, style: RectStyles) -> Self {
+        self.offset += UVec2::ONE;
+        Self::new(
+            self.size + UVec2::ONE,
+            DebugTreeKind::SqrtShape(style, Box::new(self)),
         )
     }
 
@@ -371,13 +414,7 @@ impl Debugable for EditorTreeTerminal {
 
 impl Debugable for EditorTreePower {
     fn debug(&self, with_cursor: bool) -> DebugTree {
-        DebugTree::horizontal(vec![
-            self.base
-                .debug(with_cursor && self.cursor == PowerIndex::Base),
-            self.power
-                .debug(with_cursor && self.cursor == PowerIndex::Power),
-        ])
-        .boxed(RectStyles::Bold)
+        self.power.debug(with_cursor).boxed(RectStyles::Bold)
     }
 }
 
@@ -407,12 +444,69 @@ impl Debugable for EditorTreeParen {
         let tree = self
             .child()
             .debug(with_cursor && self.cursor() == SurroundIndex::Inside)
-            .bracketed(RectStyles::Bold);
+            .bracketed(
+                RectStyles::Bold,
+                match self.is_complete() {
+                    true => RectStyles::Bold,
+                    false => RectStyles::Weak,
+                },
+            );
+
         if with_cursor && self.cursor() == SurroundIndex::Left {
             DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, tree.size.y)), tree])
         } else {
             tree
         }
+    }
+}
+
+impl Debugable for EditorTreeSqrt {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        let tree = self
+            .child()
+            .debug(with_cursor && self.cursor == SurroundIndex::Inside)
+            .sqrt(RectStyles::Weak);
+        if with_cursor && self.cursor == SurroundIndex::Left {
+            DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, tree.size.y)), tree])
+        } else {
+            tree
+        }
+    }
+}
+
+impl Debugable for EditableIdent {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        let mut ident = String::with_capacity(self.ident.len());
+        for &ch in &self.ident {
+            ident.push(ch);
+        }
+
+        if with_cursor {
+            ident.insert(self.cursor, '█');
+        }
+
+        DebugTree::text(ident)
+    }
+}
+
+impl Debugable for EditorTreeSumProd {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        let bottom_row = DebugTree::horizontal(vec![
+            self.ident
+                .debug(with_cursor && self.cursor == SumProdIndex::BottomIdent),
+            match self.cursor {
+                SumProdIndex::BottomEq => DebugTree::char2(['█', '=']),
+                _ => DebugTree::char('='),
+            },
+            self.bottom
+                .debug(with_cursor && self.cursor == SumProdIndex::BottomExpr),
+        ]);
+        DebugTree::vertical(vec![
+            self.top
+                .debug(with_cursor && self.cursor == SumProdIndex::Top),
+            DebugTree::char('∑'),
+            bottom_row,
+        ])
     }
 }
 
@@ -424,6 +518,7 @@ impl Debugable for EditorTree {
             EditorTreeKind::Fraction(fraction) => fraction.debug(with_cursor),
             EditorTreeKind::Sqrt(_) => todo!(),
             EditorTreeKind::Paren(paren) => paren.debug(with_cursor),
+            EditorTreeKind::SumProd(sum_prod) => sum_prod.debug(with_cursor),
         }
     }
 }

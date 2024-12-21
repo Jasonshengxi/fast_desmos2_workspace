@@ -1,5 +1,5 @@
 pub use actions::{ActionOutcome, TreeAction};
-pub use movement::{TreeMovable, TreeMove};
+pub use movement::{Direction, Motion, TreeMovable};
 
 mod actions;
 pub mod debug;
@@ -47,6 +47,14 @@ impl EditorTreeSeq {
         Self::new(0, children)
     }
 
+    pub fn len(&self) -> usize {
+        self.children.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty()
+    }
+
     pub fn cursor(&self) -> usize {
         self.cursor
     }
@@ -62,6 +70,22 @@ impl EditorTreeSeq {
     pub fn extend(&mut self, other: Self) {
         self.children.extend(other.children);
     }
+
+    pub fn move_to(&mut self, to: usize, from: Direction) {
+        assert!(to <= self.children.len());
+        self.cursor = to;
+        if let Some(child) = self.active_child_mut() {
+            child.enter_from(from);
+        }
+    }
+
+    pub fn move_right(&mut self, by: usize) {
+        self.move_to(self.cursor + by, Direction::Left);
+    }
+
+    pub fn move_left(&mut self, by: usize) {
+        self.move_to(self.cursor - by, Direction::Right);
+    }
 }
 
 impl EditorTree {
@@ -71,15 +95,21 @@ impl EditorTree {
         }
     }
 
-    pub fn paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn complete_paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
         Self {
-            kind: EditorTreeKind::Paren(EditorTreeParen::new(cursor, child)),
+            kind: EditorTreeKind::Paren(EditorTreeParen::complete(cursor, child)),
         }
     }
 
-    pub fn power(cursor: PowerIndex, base: EditorTreeSeq, power: EditorTreeSeq) -> Self {
+    pub fn incomplete_paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
         Self {
-            kind: EditorTreeKind::Power(EditorTreePower::new(cursor, base, power)),
+            kind: EditorTreeKind::Paren(EditorTreeParen::incomplete(cursor, child)),
+        }
+    }
+
+    pub fn power(power: EditorTreeSeq) -> Self {
+        Self {
+            kind: EditorTreeKind::Power(EditorTreePower::new(power)),
         }
     }
 
@@ -91,11 +121,12 @@ impl EditorTree {
 
     pub fn cursor(&self) -> CombinedCursor {
         match &self.kind {
-            EditorTreeKind::Power(power) => CombinedCursor::Power(power.cursor()),
+            EditorTreeKind::Power(_) => CombinedCursor::Power,
             EditorTreeKind::Fraction(fraction) => CombinedCursor::Fraction(fraction.cursor()),
             EditorTreeKind::Terminal(_) => CombinedCursor::Terminal,
             EditorTreeKind::Sqrt(sqrt) => CombinedCursor::Sqrt(sqrt.cursor()),
             EditorTreeKind::Paren(paren) => CombinedCursor::Paren(paren.cursor()),
+            EditorTreeKind::SumProd(sum_prod) => CombinedCursor::SumProd(sum_prod.cursor()),
         }
     }
 
@@ -103,9 +134,22 @@ impl EditorTree {
         match &self.kind {
             EditorTreeKind::Terminal(_) => None,
             EditorTreeKind::Fraction(fraction) => fraction.active_child(),
-            EditorTreeKind::Power(power) => power.active_child(),
+            EditorTreeKind::Power(power) => Some(power.power()),
             EditorTreeKind::Sqrt(sqrt) => sqrt.active_child(),
             EditorTreeKind::Paren(paren) => paren.active_child(),
+            EditorTreeKind::SumProd(sum_prod) => sum_prod.active_child(),
+        }
+    }
+
+    pub fn is_terminal_and_eq(&self, other: char) -> bool {
+        self.is_terminal_and(|x| x.ch == other)
+    }
+
+    pub fn is_terminal_and(&self, func: impl FnOnce(&EditorTreeTerminal) -> bool) -> bool {
+        if let EditorTreeKind::Terminal(term) = &self.kind {
+            func(term)
+        } else {
+            false
         }
     }
 }
@@ -117,34 +161,28 @@ pub enum EditorTreeKind {
     Power(EditorTreePower),
     Sqrt(EditorTreeSqrt),
     Paren(EditorTreeParen),
+    SumProd(EditorTreeSumProd),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CombinedCursor {
     Fraction(FractionIndex),
-    Power(PowerIndex),
+    Power,
     Terminal,
     Sqrt(SurroundIndex),
     Paren(SurroundIndex),
+    SumProd(SumProdIndex),
 }
 
 impl CombinedCursor {
     pub const TOP: Self = Self::Fraction(FractionIndex::Top);
     pub const BOTTOM: Self = Self::Fraction(FractionIndex::Bottom);
     pub const LEFT: Self = Self::Fraction(FractionIndex::Left);
-    pub const BASE: Self = Self::Power(PowerIndex::Base);
-    pub const POWER: Self = Self::Power(PowerIndex::Power);
 }
 
 impl From<FractionIndex> for CombinedCursor {
     fn from(value: FractionIndex) -> Self {
         Self::Fraction(value)
-    }
-}
-
-impl From<PowerIndex> for CombinedCursor {
-    fn from(value: PowerIndex) -> Self {
-        Self::Power(value)
     }
 }
 
@@ -199,13 +237,30 @@ impl_surrounds_tree_seq!(EditorTreeSqrt);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeParen {
+    is_complete: bool,
     cursor: SurroundIndex,
     child: EditorTreeSeq,
 }
 impl_surrounds_tree_seq!(EditorTreeParen);
 impl EditorTreeParen {
-    pub fn new(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
-        Self { cursor, child }
+    pub fn is_complete(&self) -> bool {
+        self.is_complete
+    }
+
+    pub fn incomplete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self {
+            is_complete: false,
+            cursor,
+            child,
+        }
+    }
+
+    pub fn complete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self {
+            is_complete: false,
+            cursor,
+            child,
+        }
     }
 }
 
@@ -270,53 +325,106 @@ impl EditorTreeFraction {
             FractionIndex::Bottom => Some(&mut self.bottom),
         }
     }
-}
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub enum PowerIndex {
-    Base,
-    Power,
+    fn move_to(&mut self, to: FractionIndex, from: Direction) {
+        self.cursor = to;
+        match to {
+            FractionIndex::Left => {}
+            FractionIndex::Top => self.top.enter_from(from),
+            FractionIndex::Bottom => self.bottom.enter_from(from),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreePower {
-    cursor: PowerIndex,
-    base: EditorTreeSeq,
     power: EditorTreeSeq,
 }
 
 impl EditorTreePower {
-    pub const fn new(cursor: PowerIndex, base: EditorTreeSeq, power: EditorTreeSeq) -> Self {
-        Self {
-            cursor,
-            base,
-            power,
-        }
-    }
-
-    pub const fn cursor(&self) -> PowerIndex {
-        self.cursor
-    }
-
-    pub const fn base(&self) -> &EditorTreeSeq {
-        &self.base
+    pub const fn new(power: EditorTreeSeq) -> Self {
+        Self { power }
     }
 
     pub const fn power(&self) -> &EditorTreeSeq {
         &self.power
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SumProdIndex {
+    BottomExpr,
+    BottomEq,
+    BottomIdent,
+    Top,
+    Left,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeSumProd {
+    cursor: SumProdIndex,
+    top: EditorTreeSeq,
+    bottom: EditorTreeSeq,
+    ident: EditableIdent,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct EditableIdent {
+    cursor: usize,
+    ident: Vec<char>,
+}
+
+impl From<Vec<char>> for EditableIdent {
+    fn from(value: Vec<char>) -> Self {
+        Self::new(0, value)
+    }
+}
+
+impl EditableIdent {
+    pub fn new(cursor: usize, ident: Vec<char>) -> Self {
+        assert!(cursor < ident.len());
+        Self { cursor, ident }
+    }
+}
+
+impl EditorTreeSumProd {
+    pub fn default_counter() -> Self {
+        Self {
+            cursor: SumProdIndex::Top,
+            top: EditorTreeSeq::one(EditorTree::terminal('5')),
+            bottom: EditorTreeSeq::one(EditorTree::terminal('0')),
+            ident: EditableIdent::from(vec!['n']),
+        }
+    }
+
+    pub const fn cursor(&self) -> SumProdIndex {
+        self.cursor
+    }
 
     pub const fn active_child(&self) -> Option<&EditorTreeSeq> {
         match self.cursor {
-            PowerIndex::Base => Some(&self.base),
-            PowerIndex::Power => Some(&self.power),
+            SumProdIndex::BottomExpr => Some(&self.bottom),
+            SumProdIndex::Top => Some(&self.top),
+            SumProdIndex::Left | SumProdIndex::BottomEq | SumProdIndex::BottomIdent => None,
         }
     }
 
     pub fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
         match self.cursor {
-            PowerIndex::Base => Some(&mut self.base),
-            PowerIndex::Power => Some(&mut self.power),
+            SumProdIndex::BottomExpr => Some(&mut self.bottom),
+            SumProdIndex::Top => Some(&mut self.top),
+            SumProdIndex::Left | SumProdIndex::BottomEq | SumProdIndex::BottomIdent => None,
+        }
+    }
+
+    fn move_to(&mut self, to: SumProdIndex, from: Direction) {
+        self.cursor = to;
+        match to {
+            SumProdIndex::BottomExpr => self.bottom.enter_from(from),
+            SumProdIndex::Top => self.top.enter_from(from),
+            SumProdIndex::BottomIdent => todo!(),
+            SumProdIndex::BottomEq => {}
+            SumProdIndex::Left => {}
         }
     }
 }
