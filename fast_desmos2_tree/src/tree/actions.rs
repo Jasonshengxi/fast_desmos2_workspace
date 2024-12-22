@@ -3,7 +3,9 @@ use std::cmp::Ordering;
 
 use crate::tree::{EditorTreeFraction, EditorTreeKind, FractionIndex};
 
-use super::{movement::Direction, EditorTree, EditorTreeSeq, SurroundIndex, TreeMovable};
+use super::{
+    movement::Direction, EditorTree, EditorTreeSeq, SumProdIndex, SurroundIndex, TreeMovable,
+};
 
 mod search_back;
 
@@ -149,27 +151,31 @@ impl EditorTreeSeq {
                                 }
                             }
                             NotLeftAction::MakePower => {
-                                self.children.push(EditorTree::power(EditorTreeSeq::empty()));
+                                self.children
+                                    .push(EditorTree::power(EditorTreeSeq::empty()));
                             }
                         }
                         None
                     }
                 }
             } else {
-                match action {
-                    TreeAction::Char(ch) => {
+                match LeftAction::try_from(action) {
+                    Ok(left_action) => return Some(SeqActionOutcome::LeftOverflow(left_action)),
+                    Err(NotLeftAction::Char(ch)) => {
                         self.children.push(EditorTree::terminal(ch));
                         self.cursor = 1;
                     }
-                    TreeAction::MakeParen => self.children.push(EditorTree::incomplete_paren(
-                        SurroundIndex::Inside,
+                    Err(NotLeftAction::MakeParen) => self.children.push(
+                        EditorTree::incomplete_paren(SurroundIndex::Inside, EditorTreeSeq::empty()),
+                    ),
+                    Err(NotLeftAction::MakeFraction) => self.children.push(EditorTree::fraction(
+                        FractionIndex::Top,
+                        EditorTreeSeq::empty(),
                         EditorTreeSeq::empty(),
                     )),
-                    TreeAction::MakeFraction | TreeAction::MakePower | TreeAction::Delete => {
-                        return Some(SeqActionOutcome::LeftOverflow(
-                            LeftAction::try_from(action).unwrap_unreach(),
-                        ))
-                    }
+                    Err(NotLeftAction::MakePower) => self
+                        .children
+                        .push(EditorTree::power(EditorTreeSeq::empty())),
                 }
                 None
             }
@@ -307,50 +313,44 @@ impl EditorTree {
             EditorTreeKind::Fraction(fraction) => match fraction.cursor() {
                 FractionIndex::Top => {
                     let outcome = fraction.top.apply_action(action);
-                    match outcome {
-                        None => None,
-                        Some(SeqActionOutcome::LeftOverflow(left_action)) => match left_action {
-                            LeftAction::Delete => {
-                                let old_self = std::mem::replace(self, EditorTree::terminal('X'));
-                                let EditorTreeKind::Fraction(EditorTreeFraction {
-                                    cursor: _,
-                                    top,
-                                    bottom,
-                                }) = old_self.kind
-                                else {
-                                    unreachable!()
-                                };
-                                Some(ActionOutcome::Splice2 {
-                                    first: top.children,
-                                    second: bottom.children,
-                                    put_cursor_first: true,
-                                })
-                            }
-                        },
+                    match outcome? {
+                        SeqActionOutcome::LeftDelete => {
+                            let old_self = std::mem::replace(self, EditorTree::terminal('X'));
+                            let EditorTreeKind::Fraction(EditorTreeFraction {
+                                cursor: _,
+                                top,
+                                bottom,
+                            }) = old_self.kind
+                            else {
+                                unreachable!()
+                            };
+                            Some(ActionOutcome::Splice2 {
+                                first: top.children,
+                                second: bottom.children,
+                                put_cursor_first: true,
+                            })
+                        }
                     }
                 }
                 FractionIndex::Bottom => {
                     let outcome = fraction.bottom.apply_action(action);
-                    match outcome {
-                        None => None,
-                        Some(SeqActionOutcome::LeftOverflow(left_action)) => match left_action {
-                            LeftAction::Delete => {
-                                let old_self = std::mem::replace(self, EditorTree::terminal('X'));
-                                let EditorTreeKind::Fraction(EditorTreeFraction {
-                                    cursor: _,
-                                    top,
-                                    bottom,
-                                }) = old_self.kind
-                                else {
-                                    unreachable!()
-                                };
-                                Some(ActionOutcome::Splice2 {
-                                    first: top.children,
-                                    second: bottom.children,
-                                    put_cursor_first: false,
-                                })
-                            }
-                        },
+                    match outcome? {
+                        SeqActionOutcome::LeftDelete => {
+                            let old_self = std::mem::replace(self, EditorTree::terminal('X'));
+                            let EditorTreeKind::Fraction(EditorTreeFraction {
+                                cursor: _,
+                                top,
+                                bottom,
+                            }) = old_self.kind
+                            else {
+                                unreachable!()
+                            };
+                            Some(ActionOutcome::Splice2 {
+                                first: top.children,
+                                second: bottom.children,
+                                put_cursor_first: false,
+                            })
+                        }
                     }
                 }
                 FractionIndex::Left => match LeftAction::try_from(action) {
@@ -365,50 +365,85 @@ impl EditorTree {
             },
             EditorTreeKind::Power(power) => {
                 let outcome = power.power.apply_action(action);
-                match outcome {
-                    Some(SeqActionOutcome::LeftOverflow(overflow)) => match overflow {
-                        LeftAction::Delete => {
-                            let old_self = std::mem::replace(self, EditorTree::terminal('X'));
-                            let EditorTreeKind::Power(power) = old_self.kind else {
-                                unreachable!()
-                            };
-                            let children = power.power.children;
-                            Some(ActionOutcome::Splice { children })
-                        }
-                    },
-                    None => todo!(),
+                match outcome? {
+                    SeqActionOutcome::LeftDelete => {
+                        let old_self = std::mem::replace(self, EditorTree::terminal('X'));
+                        let EditorTreeKind::Power(power) = old_self.kind else {
+                            unreachable!()
+                        };
+                        let children = power.power.children;
+                        Some(ActionOutcome::Splice { children })
+                    }
                 }
             }
-            EditorTreeKind::Sqrt(_) => todo!(),
-            EditorTreeKind::SumProd(_) => todo!(),
+            EditorTreeKind::SumProd(sum_prod) => {
+                match sum_prod.cursor {
+                    SumProdIndex::BottomExpr => match sum_prod.bottom.apply_action(action)? {
+                        SeqActionOutcome::LeftDelete => {
+                            sum_prod.move_to(SumProdIndex::BottomIdent, Direction::Right)
+                        }
+                    },
+                    SumProdIndex::BottomIdent => match sum_prod.bottom.apply_action(action)? {
+                        SeqActionOutcome::LeftDelete => return Some(ActionOutcome::Deleted),
+                    },
+                    SumProdIndex::Top => match sum_prod.top.apply_action(action)? {
+                        SeqActionOutcome::LeftDelete => return Some(ActionOutcome::Deleted),
+                    },
+                    SumProdIndex::Left => {
+                        return match LeftAction::try_from(action) {
+                            Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
+                            Err(_) => Some(ActionOutcome::Delegated),
+                        }
+                    }
+                };
+                None
+            }
+            EditorTreeKind::Sqrt(sqrt) => match sqrt.cursor {
+                SurroundIndex::Left => match LeftAction::try_from(action) {
+                    Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
+                    Err(_) => Some(ActionOutcome::Delegated),
+                },
+                SurroundIndex::Inside => {
+                    let outcome = sqrt.child.apply_action(action);
+                    match outcome? {
+                        SeqActionOutcome::LeftDelete => {
+                            let old_self = std::mem::replace(self, EditorTree::terminal('X'));
+                            let EditorTreeKind::Paren(paren) = old_self.kind else {
+                                unreachable!()
+                            };
+                            let children = paren.child.children;
+                            Some(ActionOutcome::Splice { children })
+                        }
+                    }
+                }
+            },
             EditorTreeKind::Paren(paren) => match paren.cursor {
                 SurroundIndex::Left => match LeftAction::try_from(action) {
                     Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
-                    Err(
-                        NotLeftAction::Char(_)
-                        | NotLeftAction::MakeFraction
-                        | NotLeftAction::MakePower
-                        | NotLeftAction::MakeParen,
-                    ) => Some(ActionOutcome::Delegated),
+                    Err(_) => Some(ActionOutcome::Delegated),
                 },
                 SurroundIndex::Inside => {
                     // bracket completion
-                    if (action, paren.child.cursor()) == (TreeAction::Char(')'), paren.child.len()) {
+                    if (action, paren.child.cursor()) == (TreeAction::Char(')'), paren.child.len())
+                    {
                         paren.is_complete = true;
                         Some(ActionOutcome::MoveRight)
                     } else {
                         let outcome = paren.child.apply_action(action);
                         match outcome {
-                            Some(SeqActionOutcome::LeftOverflow(left_action)) => match left_action {
-                                LeftAction::Delete => {
-                                    let old_self = std::mem::replace(self, EditorTree::terminal('X'));
-                                    let EditorTreeKind::Paren(paren) = old_self.kind else {
-                                        unreachable!()
-                                    };
-                                    let children = paren.child.children;
-                                    Some(ActionOutcome::Splice { children })
+                            Some(SeqActionOutcome::LeftOverflow(left_action)) => {
+                                match left_action {
+                                    LeftAction::Delete => {
+                                        let old_self =
+                                            std::mem::replace(self, EditorTree::terminal('X'));
+                                        let EditorTreeKind::Paren(paren) = old_self.kind else {
+                                            unreachable!()
+                                        };
+                                        let children = paren.child.children;
+                                        Some(ActionOutcome::Splice { children })
+                                    }
                                 }
-                            },
+                            }
                             None => None,
                         }
                     }
@@ -428,15 +463,30 @@ impl EditorTree {
                     Some(ActionOutcome::CaptureCursor)
                 }
             },
-            EditorTreeKind::Power(_) => todo!(),
-            EditorTreeKind::Sqrt(_) => todo!(),
+            EditorTreeKind::Power(power) => match action {
+                LeftAction::Delete => {
+                    power.enter_from(Direction::Right);
+                    Some(ActionOutcome::CaptureCursor)
+                }
+            },
+            EditorTreeKind::Sqrt(sqrt) => match action {
+                LeftAction::Delete => {
+                    sqrt.enter_from(Direction::Right);
+                    Some(ActionOutcome::CaptureCursor)
+                }
+            },
             EditorTreeKind::Paren(paren) => match action {
                 LeftAction::Delete => {
                     paren.is_complete = false;
                     Some(ActionOutcome::CaptureCursor)
                 }
             },
-            EditorTreeKind::SumProd(_) => todo!(),
+            EditorTreeKind::SumProd(sum_prod) => match action {
+                LeftAction::Delete => {
+                    sum_prod.move_to(SumProdIndex::Top, Direction::Right);
+                    Some(ActionOutcome::CaptureCursor)
+                }
+            },
         }
     }
 }

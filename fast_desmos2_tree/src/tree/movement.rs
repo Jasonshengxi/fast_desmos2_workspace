@@ -1,7 +1,7 @@
 use crate::tree::SumProdIndex;
 
 use super::{
-    EditableIdent, EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreePower, EditorTreeSeq,
+    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreePower, EditorTreeSeq,
     EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SurroundIndex, SurroundsTreeSeq,
 };
 
@@ -72,7 +72,7 @@ impl TreeMovable for EditorTreeSeq {
                 true => return movement,
                 false => self.move_to(self.children.len(), Direction::Right),
             },
-            None | Some(Motion::Up | Motion::Down) => return None,
+            None | Some(Motion::Up | Motion::Down) => return movement,
         }
         None
     }
@@ -97,6 +97,7 @@ impl TreeMovable for EditorTreeTerminal {
 
     fn enter_from(&mut self, _direction: Direction) {}
 }
+
 impl TreeMovable for EditorTreePower {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         self.power.apply_move(movement)
@@ -106,6 +107,7 @@ impl TreeMovable for EditorTreePower {
         self.power.enter_from(direction);
     }
 }
+
 impl TreeMovable for EditorTreeFraction {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         match self.cursor {
@@ -174,42 +176,13 @@ impl<T: SurroundsTreeSeq> TreeMovable for T {
     }
 }
 
-impl TreeMovable for EditableIdent {
-    fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
-        match movement {
-            Motion::Left => match self.cursor.checked_sub(1) {
-                None => return Some(movement),
-                Some(left) => self.cursor = left,
-            },
-            Motion::Right => match self.cursor == self.ident.len() - 1 {
-                true => return Some(movement),
-                false => self.cursor += 1,
-            },
-            Motion::First | Motion::Back => match self.cursor == 0 {
-                true => return Some(movement),
-                false => self.cursor = 0,
-            },
-            Motion::Last | Motion::Word | Motion::Up | Motion::Down => return Some(movement),
-        }
-        None
-    }
-
-    fn enter_from(&mut self, direction: Direction) {
-        match direction {
-            Direction::Up | Direction::Down => {}
-            Direction::Left => self.cursor = 0,
-            Direction::Right => unreachable!(),
-        }
-    }
-}
-
 impl TreeMovable for EditorTreeSumProd {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         match self.cursor {
             SumProdIndex::BottomExpr => match self.bottom.apply_move(movement) {
                 Some(Motion::Up) => self.move_to(SumProdIndex::Top, Direction::Down),
                 Some(Motion::Left | Motion::Back) => {
-                    self.move_to(SumProdIndex::BottomEq, Direction::Right)
+                    self.move_to(SumProdIndex::BottomIdent, Direction::Right)
                 }
                 Some(Motion::First) => self.move_to(SumProdIndex::BottomIdent, Direction::Left),
                 outcome @ (None
@@ -224,26 +197,12 @@ impl TreeMovable for EditorTreeSumProd {
                     _ => return Some(movement), // also basically outside the sumprod
                 }
             }
-            SumProdIndex::BottomEq => match movement {
-                Motion::Down => return Some(Motion::Down),
-                Motion::Up => self.move_to(SumProdIndex::Top, Direction::Down),
-
-                Motion::First | Motion::Back => {
-                    self.move_to(SumProdIndex::BottomIdent, Direction::Left)
-                }
-                Motion::Left => self.move_to(SumProdIndex::BottomIdent, Direction::Right),
-
-                Motion::Word | Motion::Right => {
-                    self.move_to(SumProdIndex::BottomExpr, Direction::Left)
-                }
-                Motion::Last => self.move_to(SumProdIndex::BottomExpr, Direction::Right),
-            },
             SumProdIndex::BottomIdent => match self.ident.apply_move(movement) {
                 None => {}
                 Some(Motion::Up) => self.move_to(SumProdIndex::Top, Direction::Down),
                 Some(Motion::Left) => self.move_to(SumProdIndex::Left, Direction::Right),
                 Some(Motion::Right | Motion::Word) => {
-                    self.move_to(SumProdIndex::BottomEq, Direction::Left)
+                    self.move_to(SumProdIndex::BottomExpr, Direction::Left)
                 }
                 Some(Motion::Last) => self.move_to(SumProdIndex::BottomExpr, Direction::Right),
                 outcome @ Some(Motion::First | Motion::Back | Motion::Down) => return outcome,

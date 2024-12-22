@@ -12,6 +12,7 @@ pub trait ResExt {
 impl<T> OptExt for Option<T> {
     type T = T;
 
+    #[track_caller]
     fn unwrap_unreach(self) -> Self::T {
         self.unwrap_or_else(|| unreachable!())
     }
@@ -19,10 +20,12 @@ impl<T> OptExt for Option<T> {
 impl<T, E> ResExt for Result<T, E> {
     type T = T;
 
+    #[track_caller]
     fn unwrap_unreach(self) -> Self::T {
         self.unwrap_or_else(|_| unreachable!())
     }
 
+    #[track_caller]
     fn assert_ok(self) -> Self {
         self.map_err(|_| unreachable!())
     }

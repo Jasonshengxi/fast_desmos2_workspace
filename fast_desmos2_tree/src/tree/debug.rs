@@ -5,9 +5,9 @@ use glam::UVec2;
 use crate::tree::SumProdIndex;
 
 use super::{
-    EditableIdent, EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen,
-    EditorTreePower, EditorTreeSeq, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal,
-    FractionIndex, SurroundIndex, SurroundsTreeSeq,
+    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreePower,
+    EditorTreeSeq, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal, FractionIndex,
+    SurroundIndex, SurroundsTreeSeq,
 };
 
 trait RectStyle {
@@ -242,16 +242,22 @@ impl DebugTree {
 
                 let outer = offset + self.size - 1;
                 if self.size.y == 1 {
-                    screen.write(offset, match left {
-                        RectStyles::Normal => todo!(),
-                        RectStyles::Bold => '[',
-                        RectStyles::Weak => '(',
-                    });
-                    screen.write(outer, match right {
-                        RectStyles::Normal => todo!(),
-                        RectStyles::Bold => ']',
-                        RectStyles::Weak => ')',
-                    });
+                    screen.write(
+                        offset,
+                        match left {
+                            RectStyles::Normal => todo!(),
+                            RectStyles::Bold => '[',
+                            RectStyles::Weak => '(',
+                        },
+                    );
+                    screen.write(
+                        outer,
+                        match right {
+                            RectStyles::Normal => todo!(),
+                            RectStyles::Bold => ']',
+                            RectStyles::Weak => ')',
+                        },
+                    );
                 } else {
                     for y in (offset.y + 1)..=(outer.y - 1) {
                         screen.write(offset.with_y(y), style_get!(left::LINE_Y));
@@ -474,30 +480,12 @@ impl Debugable for EditorTreeSqrt {
     }
 }
 
-impl Debugable for EditableIdent {
-    fn debug(&self, with_cursor: bool) -> DebugTree {
-        let mut ident = String::with_capacity(self.ident.len());
-        for &ch in &self.ident {
-            ident.push(ch);
-        }
-
-        if with_cursor {
-            ident.insert(self.cursor, '█');
-        }
-
-        DebugTree::text(ident)
-    }
-}
-
 impl Debugable for EditorTreeSumProd {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         let bottom_row = DebugTree::horizontal(vec![
             self.ident
                 .debug(with_cursor && self.cursor == SumProdIndex::BottomIdent),
-            match self.cursor {
-                SumProdIndex::BottomEq => DebugTree::char2(['█', '=']),
-                _ => DebugTree::char('='),
-            },
+            DebugTree::char('='),
             self.bottom
                 .debug(with_cursor && self.cursor == SumProdIndex::BottomExpr),
         ]);
@@ -516,7 +504,7 @@ impl Debugable for EditorTree {
             EditorTreeKind::Terminal(term) => term.debug(with_cursor),
             EditorTreeKind::Power(power) => power.debug(with_cursor),
             EditorTreeKind::Fraction(fraction) => fraction.debug(with_cursor),
-            EditorTreeKind::Sqrt(_) => todo!(),
+            EditorTreeKind::Sqrt(sqrt) => sqrt.debug(with_cursor),
             EditorTreeKind::Paren(paren) => paren.debug(with_cursor),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.debug(with_cursor),
         }

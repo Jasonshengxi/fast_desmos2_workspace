@@ -354,7 +354,6 @@ impl EditorTreePower {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SumProdIndex {
     BottomExpr,
-    BottomEq,
     BottomIdent,
     Top,
     Left,
@@ -365,26 +364,7 @@ pub struct EditorTreeSumProd {
     cursor: SumProdIndex,
     top: EditorTreeSeq,
     bottom: EditorTreeSeq,
-    ident: EditableIdent,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct EditableIdent {
-    cursor: usize,
-    ident: Vec<char>,
-}
-
-impl From<Vec<char>> for EditableIdent {
-    fn from(value: Vec<char>) -> Self {
-        Self::new(0, value)
-    }
-}
-
-impl EditableIdent {
-    pub fn new(cursor: usize, ident: Vec<char>) -> Self {
-        assert!(cursor < ident.len());
-        Self { cursor, ident }
-    }
+    ident: EditorTreeSeq,
 }
 
 impl EditorTreeSumProd {
@@ -393,7 +373,7 @@ impl EditorTreeSumProd {
             cursor: SumProdIndex::Top,
             top: EditorTreeSeq::one(EditorTree::terminal('5')),
             bottom: EditorTreeSeq::one(EditorTree::terminal('0')),
-            ident: EditableIdent::from(vec!['n']),
+            ident: EditorTreeSeq::str("n"),
         }
     }
 
@@ -404,16 +384,18 @@ impl EditorTreeSumProd {
     pub const fn active_child(&self) -> Option<&EditorTreeSeq> {
         match self.cursor {
             SumProdIndex::BottomExpr => Some(&self.bottom),
+            SumProdIndex::BottomIdent => Some(&self.ident),
             SumProdIndex::Top => Some(&self.top),
-            SumProdIndex::Left | SumProdIndex::BottomEq | SumProdIndex::BottomIdent => None,
+            SumProdIndex::Left => None,
         }
     }
 
     pub fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
         match self.cursor {
             SumProdIndex::BottomExpr => Some(&mut self.bottom),
+            SumProdIndex::BottomIdent => Some(&mut self.ident),
             SumProdIndex::Top => Some(&mut self.top),
-            SumProdIndex::Left | SumProdIndex::BottomEq | SumProdIndex::BottomIdent => None,
+            SumProdIndex::Left => None,
         }
     }
 
@@ -422,8 +404,7 @@ impl EditorTreeSumProd {
         match to {
             SumProdIndex::BottomExpr => self.bottom.enter_from(from),
             SumProdIndex::Top => self.top.enter_from(from),
-            SumProdIndex::BottomIdent => todo!(),
-            SumProdIndex::BottomEq => {}
+            SumProdIndex::BottomIdent => self.ident.enter_from(from),
             SumProdIndex::Left => {}
         }
     }
