@@ -72,9 +72,11 @@ macro_rules! parse_surrounds {
         $kind: ident ::$variant: ident (_) => |$input: ident| $expr: expr
     })*) => {
         $(fn $name<'a>(input: ParseExtra<'a>) -> impl Parser<ParseInput<'a>, Output = EvalNode> + 'a {
-            satisfy_map::<ParseInput, _, &EditorTreeSeq>(|tree: &EditorTree| match tree.kind() {
-                $kind::$variant(paren) => Some(paren.child()),
-                _ => None,
+            satisfy_map::<ParseInput, _, &EditorTreeSeq>(|tree: &EditorTree| {
+                match tree.kind() {
+                    $kind::$variant(paren) => Some(paren.child()),
+                    _ => None,
+                }
             })
             .and_then(move |child| {
                 parse_seq(input)
@@ -95,6 +97,6 @@ parse_surrounds! {
     }
 
     fn parse_abs() {
-        EditorTreeKind::Sqrt(_) => |x| EvalNode::abs(x.0)
+        EditorTreeKind::Abs(_) => |x| EvalNode::abs(x.0)
     }
 }

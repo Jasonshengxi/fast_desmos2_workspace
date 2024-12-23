@@ -49,9 +49,9 @@ fn sqrt_numbers() {
 fn abs_numbers() {
     let (parsed, _) = parse(EditorTreeSeq::one(EditorTree::complete_abs(
         SurroundIndex::Inside,
-        EditorTreeSeq::str("0.111"),
+        EditorTreeSeq::str("0"),
     )));
-    assert_eq!(parsed, EvalNode::abs(EvalNode::number(0.111)))
+    assert_eq!(parsed, EvalNode::abs(EvalNode::number(0.)))
 }
 
 #[test]
