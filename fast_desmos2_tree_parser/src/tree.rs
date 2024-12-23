@@ -3,6 +3,7 @@ use bitflags::bitflags;
 use elsa::FrozenVec;
 use std::cmp::Ordering;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct EvalNode {
     kind: Box<EvalKind>,
 }
@@ -12,6 +13,26 @@ impl EvalNode {
         Self {
             kind: Box::new(kind),
         }
+    }
+
+    pub fn kind(&self) -> &EvalKind {
+        &self.kind
+    }
+
+    pub fn number(x: f64) -> Self {
+        Self::new(EvalKind::Number(x))
+    }
+
+    pub fn ident(ident: IdentId) -> Self {
+        Self::new(EvalKind::Identifier(ident))
+    }
+
+    pub fn abs(node: EvalNode) -> Self {
+        Self::new(EvalKind::Abs(node))
+    }
+
+    pub fn sqrt(node: EvalNode) -> Self {
+        Self::new(EvalKind::Sqrt(node))
     }
 }
 
@@ -35,6 +56,14 @@ impl IdentStorer {
             self.ids.push(ident.to_string().into_boxed_str());
             IdentId(new_id)
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
     }
 }
 
@@ -67,7 +96,7 @@ pub enum Element {
 }
 
 bitflags! {
-    #[derive(Debug, Copy, Clone)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct CompSet: u8 {
         const MORE = 0b100;
         const EQUAL = 0b010;
@@ -110,11 +139,13 @@ impl CompSet {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Conditional {
     exprs: Vec<EvalNode>,
     comps: Vec<CompSet>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum EvalKind {
     Identifier(IdentId),
     Builtins(Builtins),
@@ -140,10 +171,7 @@ pub enum EvalKind {
         top: EvalNode,
         bottom: EvalNode,
     },
-    Root {
-        root: Option<EvalNode>,
-        expr: EvalNode,
-    },
+    Sqrt(EvalNode),
     Exp {
         expr: EvalNode,
         exp: EvalNode,

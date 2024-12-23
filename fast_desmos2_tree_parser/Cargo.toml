@@ -5,5 +5,6 @@ edition = "2021"
 
 [dependencies]
 bitflags = "2.6.0"
+combine = "4.6.7"
 elsa = "1.10.0"
 fast_desmos2_tree = { path = "../fast_desmos2_tree" }

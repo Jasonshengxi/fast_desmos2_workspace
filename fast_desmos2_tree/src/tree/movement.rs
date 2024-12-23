@@ -242,6 +242,7 @@ impl TreeMovable for EditorTree {
             EditorTreeKind::Fraction(fraction) => fraction.enter_from(direction),
             EditorTreeKind::Sqrt(sqrt) => sqrt.enter_from(direction),
             EditorTreeKind::Paren(paren) => paren.enter_from(direction),
+            EditorTreeKind::Abs(abs) => abs.enter_from(direction),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.enter_from(direction),
         }
     }
@@ -253,6 +254,7 @@ impl TreeMovable for EditorTree {
             EditorTreeKind::Fraction(fraction) => fraction.apply_move(movement),
             EditorTreeKind::Sqrt(sqrt) => sqrt.apply_move(movement),
             EditorTreeKind::Paren(paren) => paren.apply_move(movement),
+            EditorTreeKind::Abs(abs) => abs.apply_move(movement),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.apply_move(movement),
         }
     }

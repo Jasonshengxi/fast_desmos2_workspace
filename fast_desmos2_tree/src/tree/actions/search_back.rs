@@ -128,7 +128,10 @@ impl SearchState<'_> {
                 self.advance_item()
             }
             EditorTreeKind::SumProd(_) => Err(SearchError::FoundSumProdFirst),
-            EditorTreeKind::Fraction(_) | EditorTreeKind::Sqrt(_) | EditorTreeKind::Paren(_) => {
+            EditorTreeKind::Fraction(_)
+            | EditorTreeKind::Sqrt(_)
+            | EditorTreeKind::Paren(_)
+            | EditorTreeKind::Abs(_) => {
                 self.advance();
                 Ok(())
             }

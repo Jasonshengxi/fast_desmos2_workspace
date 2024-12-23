@@ -15,6 +15,7 @@ pub enum TreeAction {
     MakeFraction,
     MakePower,
     MakeParen,
+    MakeAbs,
     Delete,
 }
 
@@ -27,6 +28,7 @@ pub enum LeftAction {
 pub enum NotLeftAction {
     Char(char),
     MakeParen,
+    MakeAbs,
     MakeFraction,
     MakePower,
 }
@@ -48,6 +50,7 @@ impl TryFrom<TreeAction> for LeftAction {
             TreeAction::MakePower => Err(Self::Error::MakePower),
             TreeAction::Delete => Ok(Self::Delete),
             TreeAction::MakeParen => Err(Self::Error::MakeParen),
+            TreeAction::MakeAbs => Err(Self::Error::MakeAbs),
             TreeAction::Char(ch) => Err(Self::Error::Char(ch)),
         }
     }
@@ -59,6 +62,7 @@ impl TreeAction {
             '/' => Self::MakeFraction,
             '^' => Self::MakePower,
             '(' => Self::MakeParen,
+            '|' => Self::MakeAbs,
             otherwise => Self::Char(otherwise),
         }
     }
@@ -137,6 +141,12 @@ impl EditorTreeSeq {
                                     EditorTreeSeq::empty(),
                                 ));
                             }
+                            NotLeftAction::MakeAbs => {
+                                self.children.push(EditorTree::incomplete_abs(
+                                    SurroundIndex::Inside,
+                                    EditorTreeSeq::empty(),
+                                ));
+                            }
                             NotLeftAction::MakeFraction => {
                                 if let Ok(start_index) = self.search_back(self.cursor) {
                                     let section: Vec<_> =
@@ -168,6 +178,10 @@ impl EditorTreeSeq {
                     Err(NotLeftAction::MakeParen) => self.children.push(
                         EditorTree::incomplete_paren(SurroundIndex::Inside, EditorTreeSeq::empty()),
                     ),
+                    Err(NotLeftAction::MakeAbs) => self.children.push(EditorTree::incomplete_abs(
+                        SurroundIndex::Inside,
+                        EditorTreeSeq::empty(),
+                    )),
                     Err(NotLeftAction::MakeFraction) => self.children.push(EditorTree::fraction(
                         FractionIndex::Top,
                         EditorTreeSeq::empty(),
@@ -283,6 +297,14 @@ impl EditorTreeSeq {
                     );
                     self.children.push(new_child);
                 }
+                TreeAction::MakeAbs => {
+                    let useful = self.children.drain(index..).collect::<Vec<_>>();
+                    let new_child = EditorTree::incomplete_abs(
+                        SurroundIndex::Inside,
+                        EditorTreeSeq::new(0, useful),
+                    );
+                    self.children.push(new_child);
+                }
             },
             Some(ActionOutcome::CaptureCursor) => self.cursor = index,
             Some(ActionOutcome::MoveRight) => self.move_right(1),
@@ -308,6 +330,7 @@ impl EditorTree {
                 TreeAction::Char(_)
                 | TreeAction::MakePower
                 | TreeAction::MakeFraction
+                | TreeAction::MakeAbs
                 | TreeAction::MakeParen => Some(ActionOutcome::Delegated),
             },
             EditorTreeKind::Fraction(fraction) => match fraction.cursor() {
@@ -359,6 +382,7 @@ impl EditorTree {
                         NotLeftAction::Char(_)
                         | NotLeftAction::MakeParen
                         | NotLeftAction::MakePower
+                        | NotLeftAction::MakeAbs
                         | NotLeftAction::MakeFraction => Some(ActionOutcome::Delegated),
                     },
                 },
@@ -449,6 +473,37 @@ impl EditorTree {
                     }
                 }
             },
+            EditorTreeKind::Abs(abs) => match abs.cursor {
+                SurroundIndex::Left => match LeftAction::try_from(action) {
+                    Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
+                    Err(_) => Some(ActionOutcome::Delegated),
+                },
+                SurroundIndex::Inside => {
+                    // bracket completion
+                    if (action, abs.child.cursor()) == (TreeAction::Char('|'), abs.child.len()) {
+                        abs.is_complete = true;
+                        Some(ActionOutcome::MoveRight)
+                    } else {
+                        let outcome = abs.child.apply_action(action);
+                        match outcome {
+                            Some(SeqActionOutcome::LeftOverflow(left_action)) => {
+                                match left_action {
+                                    LeftAction::Delete => {
+                                        let old_self =
+                                            std::mem::replace(self, EditorTree::terminal('X'));
+                                        let EditorTreeKind::Paren(paren) = old_self.kind else {
+                                            unreachable!()
+                                        };
+                                        let children = paren.child.children;
+                                        Some(ActionOutcome::Splice { children })
+                                    }
+                                }
+                            }
+                            None => None,
+                        }
+                    }
+                }
+            },
         }
     }
 
@@ -478,6 +533,12 @@ impl EditorTree {
             EditorTreeKind::Paren(paren) => match action {
                 LeftAction::Delete => {
                     paren.is_complete = false;
+                    Some(ActionOutcome::CaptureCursor)
+                }
+            },
+            EditorTreeKind::Abs(abs) => match action {
+                LeftAction::Delete => {
+                    abs.is_complete = false;
                     Some(ActionOutcome::CaptureCursor)
                 }
             },

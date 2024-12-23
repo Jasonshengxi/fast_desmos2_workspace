@@ -47,6 +47,10 @@ impl EditorTreeSeq {
         Self::new(0, children)
     }
 
+    pub fn children(&self) -> &[EditorTree] {
+        &self.children
+    }
+
     pub fn len(&self) -> usize {
         self.children.len()
     }
@@ -89,34 +93,52 @@ impl EditorTreeSeq {
 }
 
 impl EditorTree {
+    pub fn new(kind: EditorTreeKind) -> Self {
+        Self { kind }
+    }
+
     pub fn terminal(ch: char) -> Self {
-        Self {
-            kind: EditorTreeKind::Terminal(EditorTreeTerminal::new(ch)),
-        }
+        Self::new(EditorTreeKind::Terminal(EditorTreeTerminal::new(ch)))
+    }
+
+    pub fn sqrt(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self::new(EditorTreeKind::Sqrt(EditorTreeSqrt { cursor, child }))
     }
 
     pub fn complete_paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
-        Self {
-            kind: EditorTreeKind::Paren(EditorTreeParen::complete(cursor, child)),
-        }
+        Self::new(EditorTreeKind::Paren(EditorTreeParen::complete(
+            cursor, child,
+        )))
     }
 
     pub fn incomplete_paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
-        Self {
-            kind: EditorTreeKind::Paren(EditorTreeParen::incomplete(cursor, child)),
-        }
+        Self::new(EditorTreeKind::Paren(EditorTreeParen::incomplete(
+            cursor, child,
+        )))
+    }
+
+    pub fn complete_abs(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self::new(EditorTreeKind::Abs(EditorTreeAbs::complete(cursor, child)))
+    }
+
+    pub fn incomplete_abs(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self::new(EditorTreeKind::Abs(EditorTreeAbs::incomplete(
+            cursor, child,
+        )))
     }
 
     pub fn power(power: EditorTreeSeq) -> Self {
-        Self {
-            kind: EditorTreeKind::Power(EditorTreePower::new(power)),
-        }
+        Self::new(EditorTreeKind::Power(EditorTreePower::new(power)))
     }
 
     pub fn fraction(cursor: FractionIndex, top: EditorTreeSeq, bottom: EditorTreeSeq) -> Self {
-        Self {
-            kind: EditorTreeKind::Fraction(EditorTreeFraction::new(cursor, top, bottom)),
-        }
+        Self::new(EditorTreeKind::Fraction(EditorTreeFraction::new(
+            cursor, top, bottom,
+        )))
+    }
+
+    pub fn kind(&self) -> &EditorTreeKind {
+        &self.kind
     }
 
     pub fn cursor(&self) -> CombinedCursor {
@@ -126,6 +148,7 @@ impl EditorTree {
             EditorTreeKind::Terminal(_) => CombinedCursor::Terminal,
             EditorTreeKind::Sqrt(sqrt) => CombinedCursor::Sqrt(sqrt.cursor()),
             EditorTreeKind::Paren(paren) => CombinedCursor::Paren(paren.cursor()),
+            EditorTreeKind::Abs(abs) => CombinedCursor::Abs(abs.cursor()),
             EditorTreeKind::SumProd(sum_prod) => CombinedCursor::SumProd(sum_prod.cursor()),
         }
     }
@@ -137,6 +160,7 @@ impl EditorTree {
             EditorTreeKind::Power(power) => Some(power.power()),
             EditorTreeKind::Sqrt(sqrt) => sqrt.active_child(),
             EditorTreeKind::Paren(paren) => paren.active_child(),
+            EditorTreeKind::Abs(abs) => abs.active_child(),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.active_child(),
         }
     }
@@ -146,10 +170,26 @@ impl EditorTree {
     }
 
     pub fn is_terminal_and(&self, func: impl FnOnce(&EditorTreeTerminal) -> bool) -> bool {
-        if let EditorTreeKind::Terminal(term) = &self.kind {
-            func(term)
-        } else {
-            false
+        match self.kind() {
+            EditorTreeKind::Terminal(term) => func(term),
+            _ => false,
+        }
+    }
+
+    pub fn is_terminal_then<T>(&self, func: impl FnOnce(&EditorTreeTerminal) -> T) -> Option<T> {
+        match self.kind() {
+            EditorTreeKind::Terminal(term) => Some(func(term)),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal_and_then<T>(
+        &self,
+        func: impl FnOnce(&EditorTreeTerminal) -> Option<T>,
+    ) -> Option<T> {
+        match self.kind() {
+            EditorTreeKind::Terminal(term) => func(term),
+            _ => None,
         }
     }
 }
@@ -162,6 +202,7 @@ pub enum EditorTreeKind {
     Sqrt(EditorTreeSqrt),
     Paren(EditorTreeParen),
     SumProd(EditorTreeSumProd),
+    Abs(EditorTreeAbs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +212,7 @@ pub enum CombinedCursor {
     Terminal,
     Sqrt(SurroundIndex),
     Paren(SurroundIndex),
+    Abs(SurroundIndex),
     SumProd(SumProdIndex),
 }
 
@@ -225,6 +267,45 @@ macro_rules! impl_surrounds_tree_seq {
                 &mut self.cursor
             }
         }
+
+        impl $name {
+            pub fn child(&self) -> &EditorTreeSeq {
+                &self.child
+            }
+            pub fn child_mut(&mut self) -> &mut EditorTreeSeq {
+                &mut self.child
+            }
+            pub fn cursor(&self) -> SurroundIndex {
+                self.cursor
+            }
+            pub fn cursor_mut(&mut self) -> &mut SurroundIndex {
+                &mut self.cursor
+            }
+        }
+    };
+}
+
+macro_rules! completable_surrounds {
+    ($name: ident) => {
+        impl $name {
+            pub fn is_complete(&self) -> bool {
+                self.is_complete
+            }
+
+            pub fn new(is_complete: bool, cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+                Self {
+                    is_complete,
+                    cursor,
+                    child,
+                }
+            }
+            pub fn incomplete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+                Self::new(false, cursor, child)
+            }
+            pub fn complete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+                Self::new(true, cursor, child)
+            }
+        }
     };
 }
 
@@ -242,27 +323,16 @@ pub struct EditorTreeParen {
     child: EditorTreeSeq,
 }
 impl_surrounds_tree_seq!(EditorTreeParen);
-impl EditorTreeParen {
-    pub fn is_complete(&self) -> bool {
-        self.is_complete
-    }
+completable_surrounds!(EditorTreeParen);
 
-    pub fn incomplete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
-        Self {
-            is_complete: false,
-            cursor,
-            child,
-        }
-    }
-
-    pub fn complete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
-        Self {
-            is_complete: false,
-            cursor,
-            child,
-        }
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeAbs {
+    is_complete: bool,
+    cursor: SurroundIndex,
+    child: EditorTreeSeq,
 }
+impl_surrounds_tree_seq!(EditorTreeAbs);
+completable_surrounds!(EditorTreeAbs);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeTerminal {
@@ -272,6 +342,10 @@ pub struct EditorTreeTerminal {
 impl EditorTreeTerminal {
     pub fn new(ch: char) -> Self {
         Self { ch }
+    }
+
+    pub fn ch(&self) -> char {
+        self.ch
     }
 }
 
