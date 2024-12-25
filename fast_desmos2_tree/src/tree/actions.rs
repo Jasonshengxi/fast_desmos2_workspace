@@ -1,7 +1,9 @@
 use fast_desmos2_utils::ResExt;
 use std::cmp::Ordering;
 
-use crate::tree::{EditorTreeFraction, EditorTreeKind, FractionIndex};
+use crate::tree::{
+    CompletableSurrounds, EditorTreeFraction, EditorTreeKind, FractionIndex, SurroundsTreeSeq,
+};
 
 use super::{
     movement::Direction, EditorTree, EditorTreeSeq, SumProdIndex, SurroundIndex, TreeMovable,
@@ -324,6 +326,44 @@ impl EditorTreeSeq {
 
 impl EditorTree {
     pub fn apply_action(&mut self, action: TreeAction) -> Option<ActionOutcome> {
+        macro_rules! completable_surrounds {
+            ($paren: ident, $etk: ident :: $var: ident) => {
+                match $paren.cursor() {
+                    SurroundIndex::Left => match LeftAction::try_from(action) {
+                        Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
+                        Err(_) => Some(ActionOutcome::Delegated),
+                    },
+                    SurroundIndex::Inside => {
+                        // bracket completion
+                        if (action, $paren.child().cursor())
+                            == (TreeAction::Char(')'), $paren.child().len())
+                        {
+                            *$paren.is_complete_mut() = true;
+                            Some(ActionOutcome::MoveRight)
+                        } else {
+                            let outcome = $paren.child_mut().apply_action(action);
+                            match outcome {
+                                Some(SeqActionOutcome::LeftOverflow(left_action)) => {
+                                    match left_action {
+                                        LeftAction::Delete => {
+                                            let old_self =
+                                                std::mem::replace(self, EditorTree::terminal('X'));
+                                            let $etk::$var($paren) = old_self.kind else {
+                                                unreachable!()
+                                            };
+                                            let children = $paren.child.children;
+                                            Some(ActionOutcome::Splice { children })
+                                        }
+                                    }
+                                }
+                                None => None,
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
         match &mut self.kind {
             EditorTreeKind::Terminal(_) => match action {
                 TreeAction::Delete => Some(ActionOutcome::LeftOverflow(LeftAction::Delete)),
@@ -441,73 +481,26 @@ impl EditorTree {
                     }
                 }
             },
-            EditorTreeKind::Paren(paren) => match paren.cursor {
-                SurroundIndex::Left => match LeftAction::try_from(action) {
-                    Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
-                    Err(_) => Some(ActionOutcome::Delegated),
-                },
-                SurroundIndex::Inside => {
-                    // bracket completion
-                    if (action, paren.child.cursor()) == (TreeAction::Char(')'), paren.child.len())
-                    {
-                        paren.is_complete = true;
-                        Some(ActionOutcome::MoveRight)
-                    } else {
-                        let outcome = paren.child.apply_action(action);
-                        match outcome {
-                            Some(SeqActionOutcome::LeftOverflow(left_action)) => {
-                                match left_action {
-                                    LeftAction::Delete => {
-                                        let old_self =
-                                            std::mem::replace(self, EditorTree::terminal('X'));
-                                        let EditorTreeKind::Paren(paren) = old_self.kind else {
-                                            unreachable!()
-                                        };
-                                        let children = paren.child.children;
-                                        Some(ActionOutcome::Splice { children })
-                                    }
-                                }
-                            }
-                            None => None,
-                        }
-                    }
-                }
-            },
-            EditorTreeKind::Abs(abs) => match abs.cursor {
-                SurroundIndex::Left => match LeftAction::try_from(action) {
-                    Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
-                    Err(_) => Some(ActionOutcome::Delegated),
-                },
-                SurroundIndex::Inside => {
-                    // bracket completion
-                    if (action, abs.child.cursor()) == (TreeAction::Char('|'), abs.child.len()) {
-                        abs.is_complete = true;
-                        Some(ActionOutcome::MoveRight)
-                    } else {
-                        let outcome = abs.child.apply_action(action);
-                        match outcome {
-                            Some(SeqActionOutcome::LeftOverflow(left_action)) => {
-                                match left_action {
-                                    LeftAction::Delete => {
-                                        let old_self =
-                                            std::mem::replace(self, EditorTree::terminal('X'));
-                                        let EditorTreeKind::Paren(paren) = old_self.kind else {
-                                            unreachable!()
-                                        };
-                                        let children = paren.child.children;
-                                        Some(ActionOutcome::Splice { children })
-                                    }
-                                }
-                            }
-                            None => None,
-                        }
-                    }
-                }
-            },
+            EditorTreeKind::Paren(paren) => completable_surrounds!(paren, EditorTreeKind::Paren),
+            EditorTreeKind::Abs(abs) => completable_surrounds!(abs, EditorTreeKind::Abs),
+            EditorTreeKind::Bracket(bracket) => {
+                completable_surrounds!(bracket, EditorTreeKind::Bracket)
+            }
         }
     }
 
     pub fn apply_action_from_right(&mut self, action: LeftAction) -> Option<ActionOutcome> {
+        fn completable_surrounds<T: CompletableSurrounds>(
+            paren: &mut T,
+            action: LeftAction,
+        ) -> Option<ActionOutcome> {
+            match action {
+                LeftAction::Delete => {
+                    *paren.is_complete_mut() = false;
+                    Some(ActionOutcome::CaptureCursor)
+                }
+            }
+        }
         match &mut self.kind {
             EditorTreeKind::Terminal(_) => match action {
                 LeftAction::Delete => Some(ActionOutcome::Deleted),
@@ -530,18 +523,9 @@ impl EditorTree {
                     Some(ActionOutcome::CaptureCursor)
                 }
             },
-            EditorTreeKind::Paren(paren) => match action {
-                LeftAction::Delete => {
-                    paren.is_complete = false;
-                    Some(ActionOutcome::CaptureCursor)
-                }
-            },
-            EditorTreeKind::Abs(abs) => match action {
-                LeftAction::Delete => {
-                    abs.is_complete = false;
-                    Some(ActionOutcome::CaptureCursor)
-                }
-            },
+            EditorTreeKind::Paren(paren) => completable_surrounds(paren, action),
+            EditorTreeKind::Abs(abs) => completable_surrounds(abs, action),
+            EditorTreeKind::Bracket(bracket) => completable_surrounds(bracket, action),
             EditorTreeKind::SumProd(sum_prod) => match action {
                 LeftAction::Delete => {
                     sum_prod.move_to(SumProdIndex::Top, Direction::Right);

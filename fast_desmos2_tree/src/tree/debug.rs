@@ -507,6 +507,7 @@ impl Debugable for EditorTree {
             EditorTreeKind::Sqrt(sqrt) => sqrt.debug(with_cursor),
             EditorTreeKind::Paren(paren) => paren.debug(with_cursor),
             EditorTreeKind::Abs(abs) => todo!(),
+            EditorTreeKind::Bracket(bracket) => todo!(),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.debug(with_cursor),
         }
     }

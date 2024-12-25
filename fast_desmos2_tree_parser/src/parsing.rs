@@ -1,17 +1,26 @@
-use combine::{stream::SliceStream, Parser};
 use fast_desmos2_tree::tree::EditorTreeSeq;
+use winnow::Stateful;
 
-use crate::tree::{EvalKind, EvalNode, IdentStorer};
+use crate::tree::{EvalNode, IdentStorer};
+use stream::ParseStream;
 
 mod parser;
+mod stream;
 
-#[derive(Clone, Copy)]
-struct ParseExtra<'a> {
+#[derive(Debug, Clone, Copy)]
+pub struct ParseExtra<'a> {
     idents: &'a IdentStorer,
 }
 
-pub fn parse(tree: &EditorTreeSeq, idents: &IdentStorer) -> EvalNode {
-    let input = ParseExtra { idents };
-    let parsed = parser::parse_seq(input).parse(SliceStream(tree.children()));
-    parsed.unwrap().0
+pub fn parse<'a>(
+    tree: &'a EditorTreeSeq,
+    idents: &'a IdentStorer,
+) -> parser::ParseResult<'a, EvalNode> {
+    let state = ParseExtra { idents };
+    let mut input = Stateful {
+        input: ParseStream::new(tree.children()),
+        state,
+    };
+    // let parsed = parser::parse_seq(input).parse(SliceStream(tree.children()));
+    parser::parse_seq(&mut input)
 }

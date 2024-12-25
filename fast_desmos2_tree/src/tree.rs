@@ -127,6 +127,18 @@ impl EditorTree {
         )))
     }
 
+    pub fn complete_brackets(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self::new(EditorTreeKind::Bracket(EditorTreeBracket::complete(
+            cursor, child,
+        )))
+    }
+
+    pub fn incomplete_brackets(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self::new(EditorTreeKind::Bracket(EditorTreeBracket::incomplete(
+            cursor, child,
+        )))
+    }
+
     pub fn power(power: EditorTreeSeq) -> Self {
         Self::new(EditorTreeKind::Power(EditorTreePower::new(power)))
     }
@@ -147,9 +159,10 @@ impl EditorTree {
             EditorTreeKind::Fraction(fraction) => CombinedCursor::Fraction(fraction.cursor()),
             EditorTreeKind::Terminal(_) => CombinedCursor::Terminal,
             EditorTreeKind::Sqrt(sqrt) => CombinedCursor::Sqrt(sqrt.cursor()),
+            EditorTreeKind::SumProd(sum_prod) => CombinedCursor::SumProd(sum_prod.cursor()),
             EditorTreeKind::Paren(paren) => CombinedCursor::Paren(paren.cursor()),
             EditorTreeKind::Abs(abs) => CombinedCursor::Abs(abs.cursor()),
-            EditorTreeKind::SumProd(sum_prod) => CombinedCursor::SumProd(sum_prod.cursor()),
+            EditorTreeKind::Bracket(bracket) => CombinedCursor::Bracket(bracket.cursor()),
         }
     }
 
@@ -159,9 +172,10 @@ impl EditorTree {
             EditorTreeKind::Fraction(fraction) => fraction.active_child(),
             EditorTreeKind::Power(power) => Some(power.power()),
             EditorTreeKind::Sqrt(sqrt) => sqrt.active_child(),
+            EditorTreeKind::SumProd(sum_prod) => sum_prod.active_child(),
             EditorTreeKind::Paren(paren) => paren.active_child(),
             EditorTreeKind::Abs(abs) => abs.active_child(),
-            EditorTreeKind::SumProd(sum_prod) => sum_prod.active_child(),
+            EditorTreeKind::Bracket(bracket) => bracket.active_child(),
         }
     }
 
@@ -203,17 +217,19 @@ pub enum EditorTreeKind {
     Paren(EditorTreeParen),
     SumProd(EditorTreeSumProd),
     Abs(EditorTreeAbs),
+    Bracket(EditorTreeBracket),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CombinedCursor {
+    Terminal,
     Fraction(FractionIndex),
     Power,
-    Terminal,
     Sqrt(SurroundIndex),
     Paren(SurroundIndex),
-    Abs(SurroundIndex),
     SumProd(SumProdIndex),
+    Abs(SurroundIndex),
+    Bracket(SurroundIndex),
 }
 
 impl CombinedCursor {
@@ -249,6 +265,11 @@ trait SurroundsTreeSeq {
     fn set_cursor(&mut self, cursor: SurroundIndex) {
         *self.cursor_mut() = cursor;
     }
+}
+
+trait CompletableSurrounds: SurroundsTreeSeq {
+    fn is_complete(&self) -> bool;
+    fn is_complete_mut(&mut self) -> &mut bool;
 }
 
 macro_rules! impl_surrounds_tree_seq {
@@ -287,11 +308,18 @@ macro_rules! impl_surrounds_tree_seq {
 
 macro_rules! completable_surrounds {
     ($name: ident) => {
+        impl CompletableSurrounds for $name {
+            fn is_complete(&self) -> bool {
+                self.is_complete
+            }
+            fn is_complete_mut(&mut self) -> &mut bool {
+                &mut self.is_complete
+            }
+        }
         impl $name {
             pub fn is_complete(&self) -> bool {
                 self.is_complete
             }
-
             pub fn new(is_complete: bool, cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
                 Self {
                     is_complete,
@@ -324,6 +352,15 @@ pub struct EditorTreeParen {
 }
 impl_surrounds_tree_seq!(EditorTreeParen);
 completable_surrounds!(EditorTreeParen);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeBracket {
+    is_complete: bool,
+    cursor: SurroundIndex,
+    child: EditorTreeSeq,
+}
+impl_surrounds_tree_seq!(EditorTreeBracket);
+completable_surrounds!(EditorTreeBracket);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeAbs {

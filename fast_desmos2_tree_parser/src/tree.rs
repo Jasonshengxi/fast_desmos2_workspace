@@ -34,6 +34,26 @@ impl EvalNode {
     pub fn sqrt(node: EvalNode) -> Self {
         Self::new(EvalKind::Sqrt(node))
     }
+
+    pub fn list_literal(nodes: Vec<Self>) -> Self {
+        Self::new(EvalKind::List(nodes))
+    }
+
+    pub fn point((x, y): (Self, Self)) -> Self {
+        Self::new(EvalKind::Point(x, y))
+    }
+
+    pub fn multiply(nodes: Vec<Self>) -> Self {
+        Self::new(EvalKind::Multiply(nodes))
+    }
+
+    pub fn function_call(ident: IdentId, power: Option<Self>, params: Vec<Self>) -> Self {
+        Self::new(EvalKind::FunctionCall {
+            ident,
+            power,
+            params,
+        })
+    }
 }
 
 #[derive(Clone, Default)]
