@@ -1,4 +1,4 @@
-use std::{fmt::Display, io::Write};
+use std::fmt::Display;
 
 use glam::UVec2;
 
@@ -7,7 +7,7 @@ use crate::tree::SumProdIndex;
 use super::{
     EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreePower,
     EditorTreeSeq, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal, FractionIndex,
-    SurroundIndex, SurroundsTreeSeq,
+    SurroundIndex
 };
 
 trait RectStyle {
@@ -506,8 +506,8 @@ impl Debugable for EditorTree {
             EditorTreeKind::Fraction(fraction) => fraction.debug(with_cursor),
             EditorTreeKind::Sqrt(sqrt) => sqrt.debug(with_cursor),
             EditorTreeKind::Paren(paren) => paren.debug(with_cursor),
-            EditorTreeKind::Abs(abs) => todo!(),
-            EditorTreeKind::Bracket(bracket) => todo!(),
+            EditorTreeKind::Abs(_) => todo!(),
+            EditorTreeKind::Bracket(_) => todo!(),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.debug(with_cursor),
         }
     }

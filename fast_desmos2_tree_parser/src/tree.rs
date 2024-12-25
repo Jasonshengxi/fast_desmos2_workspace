@@ -1,4 +1,4 @@
-use crate::builtins::{self, Builtins};
+use crate::builtins::Builtins;
 use bitflags::bitflags;
 use elsa::FrozenVec;
 use std::cmp::Ordering;

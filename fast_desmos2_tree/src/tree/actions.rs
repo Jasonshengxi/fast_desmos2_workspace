@@ -1,8 +1,7 @@
-use fast_desmos2_utils::ResExt;
 use std::cmp::Ordering;
 
 use crate::tree::{
-    CompletableSurrounds, EditorTreeFraction, EditorTreeKind, FractionIndex, SurroundsTreeSeq,
+    CompletableSurrounds, EditorTreeFraction, EditorTreeKind, FractionIndex
 };
 
 use super::{

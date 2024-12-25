@@ -1,10 +1,7 @@
 use crate::tree::{
-    CombinedCursor::{self, Terminal as TM},
-    EditorTree as T, EditorTreeSeq as TS, FractionIndex, Motion, TreeMovable as _,
+    CombinedCursor::Terminal as TM,
+    EditorTree as T, EditorTreeSeq as TS, Motion, TreeMovable as _,
 };
-
-const TOP: CombinedCursor = CombinedCursor::TOP;
-const BOTTOM: CombinedCursor = CombinedCursor::BOTTOM;
 
 macro_rules! assert_cursors {
     ($tree:ident, $first_cursor:expr $(, $($cursor:expr),*)?) => {
