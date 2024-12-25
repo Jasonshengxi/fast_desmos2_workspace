@@ -1,4 +1,4 @@
-use crate::builtins::Builtins;
+use crate::builtins::{self, Builtins};
 use bitflags::bitflags;
 use elsa::FrozenVec;
 use std::cmp::Ordering;
@@ -17,6 +17,10 @@ impl EvalNode {
 
     pub fn kind(&self) -> &EvalKind {
         &self.kind
+    }
+
+    pub fn into_kind(self) -> EvalKind {
+        *self.kind
     }
 
     pub fn number(x: f64) -> Self {
@@ -45,6 +49,26 @@ impl EvalNode {
 
     pub fn multiply(nodes: Vec<Self>) -> Self {
         Self::new(EvalKind::Multiply(nodes))
+    }
+
+    pub fn index(expr: Self, index: Self) -> Self {
+        Self::new(EvalKind::ListIndexing { expr, index })
+    }
+
+    pub fn power(base: Self, power: Self) -> Self {
+        Self::new(EvalKind::Power { base, power })
+    }
+
+    pub fn list_range(from: Self, next: Option<Self>, to: Self) -> Self {
+        Self::new(EvalKind::ListRange { from, next, to })
+    }
+
+    pub fn builtins_call(builtins: Builtins, power: Option<Self>, params: Vec<Self>) -> Self {
+        Self::new(EvalKind::BuiltinsCall {
+            builtins,
+            power,
+            params,
+        })
     }
 
     pub fn function_call(ident: IdentId, power: Option<Self>, params: Vec<Self>) -> Self {
@@ -168,7 +192,11 @@ pub struct Conditional {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalKind {
     Identifier(IdentId),
-    Builtins(Builtins),
+    BuiltinsCall {
+        builtins: Builtins,
+        power: Option<EvalNode>,
+        params: Vec<EvalNode>,
+    },
     Number(f64),
     Abs(EvalNode),
     Point(EvalNode, EvalNode),
@@ -192,9 +220,9 @@ pub enum EvalKind {
         bottom: EvalNode,
     },
     Sqrt(EvalNode),
-    Exp {
-        expr: EvalNode,
-        exp: EvalNode,
+    Power {
+        base: EvalNode,
+        power: EvalNode,
     },
     For {
         expr: EvalNode,

@@ -1,17 +1,18 @@
-use std::{collections::VecDeque, marker::PhantomData};
+use std::marker::PhantomData;
 
 use fast_desmos2_tree::tree::{EditorTree, EditorTreeKind, EditorTreeSeq};
-use fast_desmos2_utils::OptExt;
 use winnow::{
-    combinator::{alt, opt, repeat, separated, separated_pair},
-    error::{ErrMode, TreeError},
+    combinator::{alt, eof, opt, preceded, repeat, separated, separated_pair, terminated},
+    error::{StrContext, StrContextValue, TreeError},
     prelude::*,
-    stream::Accumulate,
     token::any,
     Stateful,
 };
 
-use crate::tree::{EvalNode, IdentId};
+use crate::{
+    builtins::Builtins,
+    tree::{EvalNode, IdentId},
+};
 
 use super::{ParseExtra, ParseStream};
 
@@ -29,8 +30,8 @@ fn parse_add_sub<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
 
 fn parse_multiply<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
     (
-        parse_everything_else,
-        repeat::<_, _, Vec<_>, _, _>(.., parse_everything_else),
+        parse_postfix,
+        repeat::<_, _, Vec<_>, _, _>(.., parse_postfix),
     )
         .map(|(first, remaining)| {
             if remaining.is_empty() {
@@ -44,6 +45,31 @@ fn parse_multiply<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
         .parse_next(input)
 }
 
+fn parse_postfix<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+    enum Postfix {
+        Ind(EvalNode),
+        Power(EvalNode),
+    }
+
+    fn parse_single_postfix<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Postfix> {
+        alt((
+            parse_brackets_chained(parse_seq).map(Postfix::Ind),
+            parse_power_chained(parse_seq).map(Postfix::Power),
+        ))
+        .parse_next(input)
+    }
+
+    let mut output = parse_everything_else(input)?;
+    while let Ok(postfix) = parse_single_postfix(input) {
+        output = match postfix {
+            Postfix::Ind(index) => EvalNode::index(output, index),
+            Postfix::Power(power) => EvalNode::power(output, power),
+        }
+    }
+
+    Ok(output)
+}
+
 fn parse_everything_else<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
     alt((
         parse_number,
@@ -54,12 +80,14 @@ fn parse_everything_else<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Eval
         parse_sqrt,
         parse_abs,
         parse_list_literal,
+        parse_list_range,
     ))
     .parse_next(input)
 }
 
 fn parse_char<'a>(ch: char) -> impl Parser<ParseInput<'a>, (), ParseError<'a>> {
     any.verify(move |tree: &EditorTree| tree.is_terminal_and_eq(ch))
+        .context(StrContext::Expected(StrContextValue::CharLiteral(ch)))
         .void()
 }
 
@@ -69,24 +97,48 @@ fn parse_map_char<'a, T>(
     any.verify_map(move |tree: &EditorTree| tree.is_terminal_and_then(|term| map(term.ch())))
 }
 
+fn parse_list_range<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+    parse_brackets_chained((
+        parse_seq,
+        opt(preceded(parse_char(','), parse_seq)),
+        opt(parse_char(',')),
+        parse_ellipsis,
+        opt(parse_char(',')),
+        parse_seq,
+    ))
+    .map(|(from, next, _, _, _, to)| {
+        EvalNode::list_range(from, next, to)
+    })
+    .parse_next(input)
+}
+
+fn parse_ellipsis<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, ()> {
+    (parse_char('.'), parse_char('.'), parse_char('.'))
+        .void()
+        .parse_next(input)
+}
+
 fn parse_number<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    let unsigned_integer = || {
+    fn unsigned_integer<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Vec<u8>> {
         repeat(
             1..,
             parse_map_char(|ch| ch.to_digit(10).map(|x| x as u8 + b'0')),
         )
-    };
+        .parse_next(input)
+    }
 
-    let fractional_part = || (parse_char('.'), unsigned_integer());
+    fn fractional_part<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Vec<u8>> {
+        preceded(parse_char('.'), unsigned_integer).parse_next(input)
+    }
 
     alt((
-        (unsigned_integer(), opt(fractional_part())),
-        fractional_part().map(|fract| (Vec::new(), Some(fract))),
+        (unsigned_integer, opt(fractional_part)),
+        fractional_part.map(|fract| (Vec::new(), Some(fract))),
     ))
     .map(|(int_part, frac_part)| {
         // TODO fix the amount of allocation here
         let int_part = String::from_utf8(int_part).unwrap();
-        let frac_part = frac_part.map(|x| String::from_utf8(x.1).unwrap());
+        let frac_part = frac_part.map(|x| String::from_utf8(x).unwrap());
         let combined = match frac_part {
             Some(frac_part) => format!("{int_part}.{frac_part}"),
             None => int_part,
@@ -98,26 +150,34 @@ fn parse_number<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
 
 fn parse_function_call<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
     (
-        parse_raw_ident,
+        parse_raw_raw_ident,
         opt(parse_power_chained(parse_seq)),
         parse_parens_chained(separated(.., parse_seq, parse_char(','))),
     )
-        .map(|(ident, power, params)| EvalNode::function_call(ident, power, params))
+        .map(
+            |(ident, power, params): (_, _, Vec<_>)| match Builtins::from_str(ident.as_bytes()) {
+                Some(builtins) => EvalNode::builtins_call(builtins, power, params),
+                None => {
+                    let ident = input.state.idents.convert_id(&ident);
+                    EvalNode::function_call(ident, power, params)
+                }
+            },
+        )
         .parse_next(input)
 }
 
-fn parse_raw_ident<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, IdentId> {
+fn parse_raw_raw_ident<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, String> {
     repeat(
         1..,
-        any.verify_map(|tree: &EditorTree| {
-            tree.is_terminal_and_then(|term| term.ch().is_ascii_alphabetic().then_some(term.ch()))
-        }),
+        parse_map_char(|ch| ch.is_ascii_alphabetic().then_some(ch)),
     )
-    .map(|output: Vec<_>| {
-        let ident_str = output.into_iter().collect::<String>();
-        input.state.idents.convert_id(&ident_str)
-    })
     .parse_next(input)
+}
+
+fn parse_raw_ident<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, IdentId> {
+    parse_raw_raw_ident
+        .map(|ident_str| input.state.idents.convert_id(&ident_str))
+        .parse_next(input)
 }
 
 fn parse_identifier<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
@@ -158,7 +218,7 @@ fn parse_chained<'a, O>(
 ) -> impl Parser<ParseInput<'a>, O, ParseError<'a>> {
     ChainParser {
         matcher,
-        inner,
+        inner: terminated(inner, eof),
         _phantom: PhantomData,
     }
 }

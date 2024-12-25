@@ -1,14 +1,43 @@
 pub use actions::{ActionOutcome, TreeAction};
 pub use movement::{Direction, Motion, TreeMovable};
+use std::fmt::Debug;
 
 mod actions;
 pub mod debug;
 mod movement;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct EditorTreeSeq {
     cursor: usize,
     children: Vec<EditorTree>,
+}
+
+impl Debug for EditorTreeSeq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let all_str = self
+            .children()
+            .iter()
+            .all(|child| matches!(child.kind(), EditorTreeKind::Terminal(_)));
+        if all_str {
+            let mut string = String::with_capacity(self.children().len());
+
+            for child in self.children().iter() {
+                let EditorTreeKind::Terminal(term) = child.kind() else {
+                    unreachable!()
+                };
+                string.push(term.ch);
+            }
+
+            f.debug_struct("EditorTreeSeq")
+                .field("string", &string)
+                .finish()
+        } else {
+            f.debug_struct("EditorTreeSeq")
+                .field("cursor", &self.cursor)
+                .field("children", &self.children)
+                .finish()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +180,10 @@ impl EditorTree {
 
     pub fn kind(&self) -> &EditorTreeKind {
         &self.kind
+    }
+
+    pub fn into_take(self) -> EditorTreeKind {
+        self.kind
     }
 
     pub fn cursor(&self) -> CombinedCursor {
