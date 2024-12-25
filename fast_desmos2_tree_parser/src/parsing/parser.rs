@@ -11,7 +11,7 @@ use winnow::{
 
 use crate::{
     builtins::Builtins,
-    tree::{EvalNode, IdentId},
+    tree::{AddOrSub, EvalNode, IdentId},
 };
 
 use super::{ParseExtra, ParseStream};
@@ -25,15 +25,40 @@ pub fn parse_seq<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
 }
 
 fn parse_add_sub<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_multiply(input)
+    fn parse_one_add_or_sub<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, AddOrSub> {
+        alt((
+            parse_char('+').map(|_| AddOrSub::Add),
+            parse_char('-').map(|_| AddOrSub::Sub),
+        ))
+        .parse_next(input)
+    }
+
+    fn parse_single_add_sub<'a>(
+        input: &mut ParseInput<'a>,
+    ) -> ParseResult<'a, (AddOrSub, EvalNode)> {
+        (parse_one_add_or_sub, parse_multiply).parse_next(input)
+    }
+
+    (
+        opt(parse_one_add_or_sub),
+        parse_multiply,
+        repeat(.., parse_single_add_sub),
+    )
+        .map(|(first_sign, first, mut pairs): (_, _, Vec<_>)| {
+            let first_sign = first_sign.unwrap_or(AddOrSub::Add);
+            if pairs.is_empty() && first_sign == AddOrSub::Add {
+                first
+            } else {
+                pairs.insert(0, (first_sign, first));
+                EvalNode::add_sub(pairs)
+            }
+        })
+        .parse_next(input)
 }
 
 fn parse_multiply<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    (
-        parse_postfix,
-        repeat::<_, _, Vec<_>, _, _>(.., parse_postfix),
-    )
-        .map(|(first, remaining)| {
+    (parse_postfix, repeat(.., parse_postfix))
+        .map(|(first, remaining): (_, Vec<_>)| {
             if remaining.is_empty() {
                 first
             } else {
@@ -106,9 +131,7 @@ fn parse_list_range<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode>
         opt(parse_char(',')),
         parse_seq,
     ))
-    .map(|(from, next, _, _, _, to)| {
-        EvalNode::list_range(from, next, to)
-    })
+    .map(|(from, next, _, _, _, to)| EvalNode::list_range(from, next, to))
     .parse_next(input)
 }
 

@@ -63,6 +63,10 @@ impl EvalNode {
         Self::new(EvalKind::ListRange { from, next, to })
     }
 
+    pub fn add_sub(pairs: Vec<(AddOrSub, Self)>) -> Self {
+        Self::new(EvalKind::AddSub(pairs))
+    }
+
     pub fn builtins_call(builtins: Builtins, power: Option<Self>, params: Vec<Self>) -> Self {
         Self::new(EvalKind::BuiltinsCall {
             builtins,

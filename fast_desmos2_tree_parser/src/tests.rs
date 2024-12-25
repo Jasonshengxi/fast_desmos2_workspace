@@ -2,7 +2,7 @@ use fast_desmos2_tree::tree::{EditorTree, EditorTreeSeq, SurroundIndex};
 
 use crate::builtins::{Builtins, MonadicPervasive};
 use crate::parsing;
-use crate::tree::{EvalKind, EvalNode, IdentStorer};
+use crate::tree::{AddOrSub, EvalKind, EvalNode, IdentStorer};
 
 fn parse(tree: impl Into<EditorTreeSeq>) -> (EvalNode, IdentStorer) {
     let idents = IdentStorer::default();
@@ -201,5 +201,18 @@ fn test_range_simple() {
     assert_eq!(
         parsed,
         EvalNode::list_range(EvalNode::number(0.0), None, EvalNode::number(1.0),)
+    )
+}
+
+#[test]
+fn test_add_sub() {
+    let (parsed, _) = parse(str("0+1"));
+
+    assert_eq!(
+        parsed,
+        EvalNode::add_sub(vec![
+            (AddOrSub::Add, EvalNode::number(0.0)),
+            (AddOrSub::Add, EvalNode::number(1.0)),
+        ])
     )
 }
