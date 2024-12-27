@@ -1,4 +1,6 @@
 use std::fmt::Display;
+#[cfg(feature = "binary")]
+use std::io::Write as _;
 
 use glam::UVec2;
 
@@ -6,8 +8,8 @@ use crate::tree::SumProdIndex;
 
 use super::{
     EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreePower,
-    EditorTreeSeq, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal, FractionIndex,
-    SurroundIndex
+    EditorTreeSeq, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SumOrProd,
+    SurroundIndex,
 };
 
 trait RectStyle {
@@ -86,6 +88,10 @@ impl CharScreen {
 
     fn calc_index(&self, pos: UVec2) -> usize {
         pos.x as usize + pos.y as usize * self.width
+    }
+
+    fn read(&self, pos: UVec2) -> char {
+        self.screen[self.calc_index(pos)]
     }
 
     fn write(&mut self, pos: UVec2, char: char) {
@@ -225,11 +231,11 @@ impl DebugTree {
                 child.render_to(screen, offset + child.offset);
 
                 let outer = offset + self.size - 1;
-                for x in (offset.x + 1)..=(outer.x - 1) {
-                    screen.write(offset.with_x(x), style_get!(style::LINE_Y));
+                for x in (offset.x)..=(outer.x) {
+                    screen.write(offset.with_x(x), style_get!(style::LINE_X));
                 }
-                for y in (offset.y + 1)..=(outer.y - 1) {
-                    screen.write(offset.with_y(y), style_get!(style::LINE_X));
+                for y in (offset.y)..=(outer.y) {
+                    screen.write(offset.with_y(y), style_get!(style::LINE_Y));
                 }
                 screen.write(offset, style_get!(style::CORNER_UL));
             }
@@ -471,7 +477,7 @@ impl Debugable for EditorTreeSqrt {
         let tree = self
             .child()
             .debug(with_cursor && self.cursor == SurroundIndex::Inside)
-            .sqrt(RectStyles::Weak);
+            .sqrt(RectStyles::Normal);
         if with_cursor && self.cursor == SurroundIndex::Left {
             DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, tree.size.y)), tree])
         } else {
@@ -489,12 +495,23 @@ impl Debugable for EditorTreeSumProd {
             self.bottom
                 .debug(with_cursor && self.cursor == SumProdIndex::BottomExpr),
         ]);
-        DebugTree::vertical(vec![
+        let result = DebugTree::vertical(vec![
             self.top
                 .debug(with_cursor && self.cursor == SumProdIndex::Top),
-            DebugTree::char('∑'),
+            DebugTree::char(match self.sum_or_prod {
+                SumOrProd::Sum => '∑',
+                SumOrProd::Prod => '∏',
+            }),
             bottom_row,
-        ])
+        ]);
+
+        match (self.cursor(), with_cursor) {
+            (SumProdIndex::Left, true) => DebugTree::horizontal(vec![
+                DebugTree::solid(UVec2::new(1, result.size.y)),
+                result,
+            ]),
+            _ => result,
+        }
     }
 }
 
@@ -508,6 +525,7 @@ impl Debugable for EditorTree {
             EditorTreeKind::Paren(paren) => paren.debug(with_cursor),
             EditorTreeKind::Abs(_) => todo!(),
             EditorTreeKind::Bracket(_) => todo!(),
+            EditorTreeKind::Curly(_) => todo!(),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.debug(with_cursor),
         }
     }

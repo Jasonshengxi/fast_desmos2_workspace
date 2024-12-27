@@ -156,6 +156,18 @@ impl EditorTree {
         )))
     }
 
+    pub fn complete_curly(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self::new(EditorTreeKind::Curly(EditorTreeCurly::complete(
+            cursor, child,
+        )))
+    }
+
+    pub fn incomplete_curly(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+        Self::new(EditorTreeKind::Curly(EditorTreeCurly::incomplete(
+            cursor, child,
+        )))
+    }
+
     pub fn complete_brackets(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
         Self::new(EditorTreeKind::Bracket(EditorTreeBracket::complete(
             cursor, child,
@@ -165,6 +177,36 @@ impl EditorTree {
     pub fn incomplete_brackets(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
         Self::new(EditorTreeKind::Bracket(EditorTreeBracket::incomplete(
             cursor, child,
+        )))
+    }
+
+    pub fn sum(
+        cursor: SumProdIndex,
+        top: EditorTreeSeq,
+        bottom: EditorTreeSeq,
+        ident: EditorTreeSeq,
+    ) -> Self {
+        Self::new(EditorTreeKind::SumProd(EditorTreeSumProd::new(
+            SumOrProd::Sum,
+            cursor,
+            top,
+            bottom,
+            ident,
+        )))
+    }
+
+    pub fn prod(
+        cursor: SumProdIndex,
+        top: EditorTreeSeq,
+        bottom: EditorTreeSeq,
+        ident: EditorTreeSeq,
+    ) -> Self {
+        Self::new(EditorTreeKind::SumProd(EditorTreeSumProd::new(
+            SumOrProd::Prod,
+            cursor,
+            top,
+            bottom,
+            ident,
         )))
     }
 
@@ -196,6 +238,7 @@ impl EditorTree {
             EditorTreeKind::Paren(paren) => CombinedCursor::Paren(paren.cursor()),
             EditorTreeKind::Abs(abs) => CombinedCursor::Abs(abs.cursor()),
             EditorTreeKind::Bracket(bracket) => CombinedCursor::Bracket(bracket.cursor()),
+            EditorTreeKind::Curly(curly) => CombinedCursor::Curly(curly.cursor()),
         }
     }
 
@@ -209,6 +252,7 @@ impl EditorTree {
             EditorTreeKind::Paren(paren) => paren.active_child(),
             EditorTreeKind::Abs(abs) => abs.active_child(),
             EditorTreeKind::Bracket(bracket) => bracket.active_child(),
+            EditorTreeKind::Curly(curly) => curly.active_child(),
         }
     }
 
@@ -251,6 +295,7 @@ pub enum EditorTreeKind {
     SumProd(EditorTreeSumProd),
     Abs(EditorTreeAbs),
     Bracket(EditorTreeBracket),
+    Curly(EditorTreeCurly),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -263,6 +308,7 @@ pub enum CombinedCursor {
     SumProd(SumProdIndex),
     Abs(SurroundIndex),
     Bracket(SurroundIndex),
+    Curly(SurroundIndex),
 }
 
 impl CombinedCursor {
@@ -396,6 +442,15 @@ impl_surrounds_tree_seq!(EditorTreeBracket);
 completable_surrounds!(EditorTreeBracket);
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreeCurly {
+    is_complete: bool,
+    cursor: SurroundIndex,
+    child: EditorTreeSeq,
+}
+impl_surrounds_tree_seq!(EditorTreeCurly);
+completable_surrounds!(EditorTreeCurly);
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeAbs {
     is_complete: bool,
     cursor: SurroundIndex,
@@ -503,8 +558,15 @@ pub enum SumProdIndex {
     Left,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SumOrProd {
+    Sum,
+    Prod,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeSumProd {
+    sum_or_prod: SumOrProd,
     cursor: SumProdIndex,
     top: EditorTreeSeq,
     bottom: EditorTreeSeq,
@@ -512,17 +574,40 @@ pub struct EditorTreeSumProd {
 }
 
 impl EditorTreeSumProd {
-    pub fn default_counter() -> Self {
+    pub fn new(
+        sum_or_prod: SumOrProd,
+        cursor: SumProdIndex,
+        top: EditorTreeSeq,
+        bottom: EditorTreeSeq,
+        ident: EditorTreeSeq,
+    ) -> Self {
         Self {
-            cursor: SumProdIndex::Top,
-            top: EditorTreeSeq::one(EditorTree::terminal('5')),
-            bottom: EditorTreeSeq::one(EditorTree::terminal('0')),
-            ident: EditorTreeSeq::str("n"),
+            sum_or_prod,
+            cursor,
+            top,
+            bottom,
+            ident,
         }
+    }
+
+    pub const fn sum_or_prod(&self) -> SumOrProd {
+        self.sum_or_prod
     }
 
     pub const fn cursor(&self) -> SumProdIndex {
         self.cursor
+    }
+
+    pub const fn top(&self) -> &EditorTreeSeq {
+        &self.top
+    }
+
+    pub const fn bottom(&self) -> &EditorTreeSeq {
+        &self.bottom
+    }
+
+    pub const fn ident(&self) -> &EditorTreeSeq {
+        &self.ident
     }
 
     pub const fn active_child(&self) -> Option<&EditorTreeSeq> {

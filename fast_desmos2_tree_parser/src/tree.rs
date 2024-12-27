@@ -1,6 +1,7 @@
 use crate::builtins::Builtins;
 use bitflags::bitflags;
 use elsa::FrozenVec;
+use fast_desmos2_tree::tree::SumOrProd;
 use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,6 +66,26 @@ impl EvalNode {
 
     pub fn add_sub(pairs: Vec<(AddOrSub, Self)>) -> Self {
         Self::new(EvalKind::AddSub(pairs))
+    }
+
+    pub fn if_else(conds: Vec<Conditional>, yes: Option<EvalNode>, no: Option<EvalNode>) -> Self {
+        Self::new(EvalKind::IfElse { conds, yes, no })
+    }
+
+    pub fn sum_prod(
+        kind: SumOrProd,
+        ident: IdentId,
+        from: EvalNode,
+        to: EvalNode,
+        expr: EvalNode,
+    ) -> Self {
+        Self::new(EvalKind::SumProd {
+            kind,
+            ident,
+            from,
+            to,
+            expr,
+        })
     }
 
     pub fn builtins_call(builtins: Builtins, power: Option<Self>, params: Vec<Self>) -> Self {
@@ -132,12 +153,6 @@ pub enum AddOrSub {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum SumOrProd {
-    Sum,
-    Prod,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Element {
     X,
     Y,
@@ -188,9 +203,27 @@ impl CompSet {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct VarDef {
+    ident: IdentId,
+    expr: EvalNode,
+}
+
+impl VarDef {
+    pub fn new(ident: IdentId, expr: EvalNode) -> Self {
+        Self { ident, expr }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Conditional {
-    exprs: Vec<EvalNode>,
-    comps: Vec<CompSet>,
+    expr: EvalNode,
+    comps: Vec<(CompSet, EvalNode)>,
+}
+
+impl Conditional {
+    pub fn new(expr: EvalNode, comps: Vec<(CompSet, EvalNode)>) -> Self {
+        Self { expr, comps }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -230,11 +263,11 @@ pub enum EvalKind {
     },
     For {
         expr: EvalNode,
-        defs: Vec<(IdentId, EvalNode)>,
+        defs: Vec<VarDef>,
     },
     ListComp {
         expr: EvalNode,
-        defs: Vec<EvalNode>,
+        defs: Vec<VarDef>,
     },
     ListRange {
         from: EvalNode,
@@ -255,8 +288,7 @@ pub enum EvalKind {
         index: EvalNode,
     },
     With {
-        ident: IdentId,
-        def: EvalNode,
         expr: EvalNode,
+        defs: Vec<VarDef>,
     },
 }

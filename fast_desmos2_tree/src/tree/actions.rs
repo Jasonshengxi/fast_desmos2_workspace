@@ -1,8 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::tree::{
-    CompletableSurrounds, EditorTreeFraction, EditorTreeKind, FractionIndex
-};
+use crate::tree::{CompletableSurrounds, EditorTreeFraction, EditorTreeKind, FractionIndex};
 
 use super::{
     movement::Direction, EditorTree, EditorTreeSeq, SumProdIndex, SurroundIndex, TreeMovable,
@@ -64,6 +62,7 @@ impl TreeAction {
             '^' => Self::MakePower,
             '(' => Self::MakeParen,
             '|' => Self::MakeAbs,
+            '*' => Self::Char('×'),
             otherwise => Self::Char(otherwise),
         }
     }
@@ -266,10 +265,73 @@ impl EditorTreeSeq {
                 TreeAction::Char(ch) => {
                     let new_node = EditorTree::terminal(ch);
                     self.children.insert(index, new_node);
-                    match index.cmp(&self.cursor) {
-                        Ordering::Equal => self.move_right(1),
-                        Ordering::Less => self.cursor += 1,
-                        Ordering::Greater => {}
+
+                    fn at_index(children: &[EditorTree], index: usize, string: &str) -> bool {
+                        string.chars().rev().enumerate().all(|(offset, ch)| {
+                            children
+                                .get(index - offset)
+                                .is_some_and(|tree| tree.is_terminal_and_eq(ch))
+                        })
+                    }
+
+                    if at_index(self.children(), index, "sqrt") {
+                        const OFFSET: usize = "sum".len() - 1;
+                        let min_index = index - OFFSET;
+                        self.children.splice(
+                            min_index..=index,
+                            std::iter::once(EditorTree::sqrt(
+                                SurroundIndex::Inside,
+                                EditorTreeSeq::empty(),
+                            )),
+                        );
+
+                        match index.cmp(&self.cursor) {
+                            Ordering::Equal => self.cursor = min_index,
+                            Ordering::Less => self.cursor -= OFFSET,
+                            Ordering::Greater => {}
+                        }
+                    } else if at_index(self.children(), index, "sum") {
+                        const OFFSET: usize = "sum".len() - 1;
+                        let min_index = index - OFFSET;
+                        self.children.splice(
+                            min_index..=index,
+                            std::iter::once(EditorTree::sum(
+                                SumProdIndex::Top,
+                                EditorTreeSeq::str("10"),
+                                EditorTreeSeq::str("1"),
+                                EditorTreeSeq::str("n"),
+                            )),
+                        );
+
+                        match index.cmp(&self.cursor) {
+                            Ordering::Equal => self.move_to(min_index + 1, Direction::Left),
+                            Ordering::Less => self.cursor -= OFFSET,
+                            Ordering::Greater => {}
+                        }
+                    } else if at_index(self.children(), index, "prod") {
+                        const OFFSET: usize = "prod".len() - 1;
+                        let min_index = index - OFFSET;
+                        self.children.splice(
+                            min_index..=index,
+                            std::iter::once(EditorTree::prod(
+                                SumProdIndex::Top,
+                                EditorTreeSeq::str("10"),
+                                EditorTreeSeq::str("1"),
+                                EditorTreeSeq::str("n"),
+                            )),
+                        );
+
+                        match index.cmp(&self.cursor) {
+                            Ordering::Equal => self.move_to(min_index + 1, Direction::Left),
+                            Ordering::Less => self.cursor -= OFFSET,
+                            Ordering::Greater => {}
+                        }
+                    } else {
+                        match index.cmp(&self.cursor) {
+                            Ordering::Equal => self.move_right(1),
+                            Ordering::Less => self.cursor += 1,
+                            Ordering::Greater => {}
+                        }
                     }
                 }
                 TreeAction::MakeFraction => {
@@ -482,6 +544,7 @@ impl EditorTree {
             },
             EditorTreeKind::Paren(paren) => completable_surrounds!(paren, EditorTreeKind::Paren),
             EditorTreeKind::Abs(abs) => completable_surrounds!(abs, EditorTreeKind::Abs),
+            EditorTreeKind::Curly(curly) => completable_surrounds!(curly, EditorTreeKind::Curly),
             EditorTreeKind::Bracket(bracket) => {
                 completable_surrounds!(bracket, EditorTreeKind::Bracket)
             }
@@ -525,6 +588,7 @@ impl EditorTree {
             EditorTreeKind::Paren(paren) => completable_surrounds(paren, action),
             EditorTreeKind::Abs(abs) => completable_surrounds(abs, action),
             EditorTreeKind::Bracket(bracket) => completable_surrounds(bracket, action),
+            EditorTreeKind::Curly(curly) => completable_surrounds(curly, action),
             EditorTreeKind::SumProd(sum_prod) => match action {
                 LeftAction::Delete => {
                     sum_prod.move_to(SumProdIndex::Top, Direction::Right);

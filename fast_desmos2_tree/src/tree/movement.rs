@@ -210,13 +210,13 @@ impl TreeMovable for EditorTreeSumProd {
             SumProdIndex::Top => match self.top.apply_move(movement) {
                 None => {}
                 Some(Motion::Down) => self.move_to(SumProdIndex::BottomExpr, Direction::Up),
+                Some(Motion::Left) => self.move_to(SumProdIndex::Left, Direction::Right),
                 outcome @ Some(
                     Motion::Up
                     | Motion::First
                     | Motion::Last
                     | Motion::Back
                     | Motion::Word
-                    | Motion::Left
                     | Motion::Right,
                 ) => return outcome,
             },
@@ -244,6 +244,7 @@ impl TreeMovable for EditorTree {
             EditorTreeKind::Paren(paren) => paren.enter_from(direction),
             EditorTreeKind::Abs(abs) => abs.enter_from(direction),
             EditorTreeKind::Bracket(bracket) => bracket.enter_from(direction),
+            EditorTreeKind::Curly(curly) => curly.enter_from(direction),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.enter_from(direction),
         }
     }
@@ -257,6 +258,7 @@ impl TreeMovable for EditorTree {
             EditorTreeKind::Paren(paren) => paren.apply_move(movement),
             EditorTreeKind::Abs(abs) => abs.apply_move(movement),
             EditorTreeKind::Bracket(bracket) => bracket.apply_move(movement),
+            EditorTreeKind::Curly(curly) => curly.apply_move(movement),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.apply_move(movement),
         }
     }

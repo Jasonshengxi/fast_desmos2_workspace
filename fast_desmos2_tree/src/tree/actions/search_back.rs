@@ -132,6 +132,7 @@ impl SearchState<'_> {
             | EditorTreeKind::Sqrt(_)
             | EditorTreeKind::Paren(_)
             | EditorTreeKind::Bracket(_)
+            | EditorTreeKind::Curly(_)
             | EditorTreeKind::Abs(_) => {
                 self.advance();
                 Ok(())

@@ -4,19 +4,35 @@ use fast_desmos2_tree::tree::EditorTree;
 use winnow::stream::{Offset, Stream, StreamIsPartial};
 
 #[derive(Debug, Clone, Copy)]
+pub struct StreamIndex(pub usize);
+
+impl<'a> Offset for StreamIndex {
+    fn offset_from(&self, &start: &Self) -> usize {
+        start.0 - self.0
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct ParseStream<'a> {
+    index: usize,
     slice: &'a [EditorTree],
+}
+
+impl<'a> Debug for ParseStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParseStream")
+            .field("index", &self.index)
+            .finish()
+    }
 }
 
 impl<'a> ParseStream<'a> {
     pub fn new(slice: &'a [EditorTree]) -> Self {
-        Self { slice }
+        Self { index: 0, slice }
     }
-}
 
-impl<'a> Offset<&'a [EditorTree]> for ParseStream<'a> {
-    fn offset_from(&self, start: &&'a [EditorTree]) -> usize {
-        self.slice.offset_from(start)
+    pub fn index(&self) -> StreamIndex {
+        StreamIndex(self.index)
     }
 }
 
@@ -31,6 +47,12 @@ impl<'a> StreamIsPartial for ParseStream<'a> {
     }
 }
 
+impl<'a> Offset<StreamIndex> for ParseStream<'a> {
+    fn offset_from(&self, start: &StreamIndex) -> usize {
+        self.index().offset_from(start)
+    }
+}
+
 impl<'a> Stream for ParseStream<'a> {
     type Token = &'a EditorTree;
 
@@ -38,19 +60,22 @@ impl<'a> Stream for ParseStream<'a> {
 
     type IterOffsets = std::iter::Enumerate<std::slice::Iter<'a, EditorTree>>;
 
-    type Checkpoint = &'a [EditorTree];
+    type Checkpoint = StreamIndex;
 
     fn iter_offsets(&self) -> Self::IterOffsets {
-        self.slice.iter().enumerate()
+        self.slice[self.index..].iter().enumerate()
     }
 
     fn eof_offset(&self) -> usize {
-        self.slice.len()
+        self.slice[self.index..].len()
     }
 
     fn next_token(&mut self) -> Option<Self::Token> {
-        let (token, remaining) = self.slice.split_first()?;
-        self.slice = remaining;
+        // let (token, remaining) = self.slice.split_first()?;
+        // self.slice = remaining;
+        // Some(token)
+        let token = self.slice.get(self.index)?;
+        self.index += 1;
         Some(token)
     }
 
@@ -58,7 +83,10 @@ impl<'a> Stream for ParseStream<'a> {
     where
         P: Fn(Self::Token) -> bool,
     {
-        self.slice.iter().position(predicate)
+        self.slice[self.index..]
+            .iter()
+            .position(predicate)
+            .map(|x| x + self.index)
     }
 
     fn offset_at(&self, tokens: usize) -> Result<usize, winnow::error::Needed> {
@@ -66,17 +94,20 @@ impl<'a> Stream for ParseStream<'a> {
     }
 
     fn next_slice(&mut self, offset: usize) -> Self::Slice {
-        let (tokens, remaining) = self.slice.split_at(offset);
-        self.slice = remaining;
-        tokens
+        // let (tokens, remaining) = self.slice.split_at(offset);
+        // self.slice = remaining;
+        // tokens
+        let slice = &self.slice[self.index..self.index + offset];
+        self.index += offset;
+        slice
     }
 
     fn checkpoint(&self) -> Self::Checkpoint {
-        self.slice
+        self.index()
     }
 
     fn reset(&mut self, checkpoint: &Self::Checkpoint) {
-        self.slice = checkpoint;
+        self.index = checkpoint.0;
     }
 
     fn raw(&self) -> &dyn Debug {

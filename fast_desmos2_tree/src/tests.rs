@@ -1,6 +1,5 @@
 use crate::tree::{
-    CombinedCursor::Terminal as TM,
-    EditorTree as T, EditorTreeSeq as TS, Motion, TreeMovable as _,
+    CombinedCursor::Terminal as TM, EditorTree as T, EditorTreeSeq as TS, Motion, TreeMovable as _,
 };
 
 macro_rules! assert_cursors {

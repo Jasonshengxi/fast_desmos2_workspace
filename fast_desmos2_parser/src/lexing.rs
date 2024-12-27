@@ -2,7 +2,7 @@ use crate::lexing::error::LexResult;
 use builtins::Builtins;
 use color_eyre::owo_colors::OwoColorize;
 pub use error::{ContextError, LexError};
-use fast_desmos2_utils::{IdVec, OptExt};
+use fast_desmos2_utils::{IdVec, ResExt};
 pub use span::Span;
 use std::cell::Cell;
 use std::fmt::{Debug, Formatter};
