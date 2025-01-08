@@ -72,13 +72,11 @@ impl EvalNode {
         Self::new(EvalKind::IfElse { conds, yes, no })
     }
 
-    pub fn sum_prod(
-        kind: SumOrProd,
-        ident: IdentId,
-        from: EvalNode,
-        to: EvalNode,
-        expr: EvalNode,
-    ) -> Self {
+    pub fn fraction(top: Self, bottom: Self) -> Self {
+        Self::new(EvalKind::Frac { top, bottom })
+    }
+
+    pub fn sum_prod(kind: SumOrProd, ident: IdentId, from: Self, to: Self, expr: Self) -> Self {
         Self::new(EvalKind::SumProd {
             kind,
             ident,

@@ -1,7 +1,9 @@
 use fast_desmos2_tree::tree::{
-    debug::Debugable as _, Direction, EditorTree as T, EditorTreeSeq as TS, FractionIndex, Motion,
-    TreeAction, TreeMovable,
+    debug::{CharScreen, Debugable as _},
+    Direction, EditorTree as T, EditorTreeSeq as TS, FractionIndex, Motion, TreeAction,
+    TreeMovable,
 };
+use fast_desmos2_tree_parser::{self as tree_parser, tree::IdentStorer};
 use glam::UVec2;
 use std::{
     fmt::Display,
@@ -24,6 +26,7 @@ fn make_stdout() -> RawTerminal<Stdout> {
 enum EditorMode {
     Normal,
     Insert,
+    Leader,
 }
 
 impl Display for EditorMode {
@@ -31,48 +34,52 @@ impl Display for EditorMode {
         match self {
             EditorMode::Normal => write!(f, "NORMAL"),
             EditorMode::Insert => write!(f, "INSERT"),
+            EditorMode::Leader => write!(f, "LEADER"),
         }
     }
+}
+
+pub fn display_raw(
+    screen: &CharScreen,
+    to: &mut termion::raw::RawTerminal<std::io::Stdout>,
+    offset: UVec2,
+) -> std::io::Result<()> {
+    use termion::cursor;
+    for y in 0..screen.height() {
+        let row_start = offset.with_y(offset.y + y as u32);
+        write!(
+            to,
+            "{}",
+            cursor::Goto(row_start.x as u16 + 1, row_start.y as u16 + 1)
+        )?;
+        for x in 0..screen.width() {
+            write!(to, "{}", screen.read(UVec2::new(x as u32, y as u32)))?;
+        }
+    }
+    Ok(())
 }
 
 fn main() -> Result<(), std::io::Error> {
     let mut stdout = make_stdout();
 
     #[rustfmt::skip]
-    let mut tree = TS::new(
-        0,
-        vec![
-            T::terminal('T'),
-            T::fraction(
-                FractionIndex::Bottom,
-                TS::new(
-                    0,
-                    vec![
-                        T::terminal('f'),
-                        T::fraction(
-                            FractionIndex::Bottom,
-                            TS::one(T::terminal('A')),
-                            TS::one(T::terminal('B')),
-                        ),
-                    ],
-                ),
-                TS::one(T::fraction(
+    let mut tree = TS::one(
+        T::fraction(
+            FractionIndex::Bottom,
+            TS::one(
+                T::fraction(
                     FractionIndex::Bottom,
-                    TS::one(T::terminal('M')),
-                    TS::one(T::terminal('L')),
-                )),
+                    TS::str("1.2"),
+                    TS::str("3.2"),
+                ),
             ),
-        ],
+            TS::one(T::fraction(
+                FractionIndex::Bottom,
+                TS::str(".2"),
+                TS::str(".7"),
+            )),
+        ),
     );
-    // #[rustfmt::skip]
-    // let mut tree = TS::new(
-    //     3,
-    //     vec![
-    //         T::str("a"),
-    //         T::str("b"),
-    //         T::str("c"),
-    //     ]
-    // );
 
     let mut mode = EditorMode::Normal;
 
@@ -90,8 +97,27 @@ fn main() -> Result<(), std::io::Error> {
             tree.apply_move(movement);
         }
 
+        let mut extra_text = String::new();
+
         let t = &mut tree;
         match mode {
+            EditorMode::Leader => {
+                match key {
+                    Key::Char('e') => {
+                        let idents = IdentStorer::default();
+                        let parsed = tree_parser::parse(&tree, &idents);
+                        match parsed {
+                            Ok(node) => extra_text = format!("{node:#?}"),
+                            Err(err) => extra_text = format!("{err:#?}"),
+                        }
+                    }
+                    Key::Char('t') => {
+                        extra_text = format!("Some test text\nhehe");
+                    }
+                    _ => {}
+                }
+                mode = EditorMode::Normal;
+            }
             EditorMode::Normal => match key {
                 Key::Char('h') => apply_move(t, Motion::Left),
                 Key::Char('j') => apply_move(t, Motion::Down),
@@ -106,6 +132,7 @@ fn main() -> Result<(), std::io::Error> {
                 Key::Char('0') => t.enter_from(Direction::Left),
 
                 Key::Char('i') => mode = EditorMode::Insert,
+                Key::Char(' ') => mode = EditorMode::Leader,
                 // Key::Char('x') => apply_action(tree, TreeAction::Delete),
                 _ => {}
             },
@@ -132,7 +159,13 @@ fn main() -> Result<(), std::io::Error> {
             color::Fg(color::Green),
             color::Fg(color::Reset)
         )?;
-        screen.display_raw(&mut stdout, UVec2::new(0, 1))?;
+        display_raw(&screen, &mut stdout, UVec2::new(0, 1))?;
+        write!(stdout, "{}", cursor::Goto(0, 3 + screen.height() as u16))?;
+
+        drop(stdout);
+        println!("{extra_text}");
+        stdout = make_stdout();
+
         stdout.flush()?;
     }
 

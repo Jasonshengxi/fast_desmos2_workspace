@@ -1,3 +1,5 @@
+use std::ffi::{CStr, CString};
+
 use crate::{has_handle, transmutable_u32};
 use gl::types::*;
 use glam::{Vec2, Vec4};
@@ -106,6 +108,10 @@ has_handle!(ShaderProgram);
 // }
 
 impl ShaderProgram {
+    pub fn compute(source: &str) -> Self {
+        Self::new([Shader::compute(source)])
+    }
+
     pub fn new<T>(shaders: T) -> Self
     where
         T: IntoIterator<Item = Shader>,
@@ -175,6 +181,14 @@ impl ShaderProgram {
         unsafe {
             gl::UseProgram(self.handle);
         }
+    }
+
+    pub fn set_uniform_u32(&self, location: i32, data: u32) {
+        unsafe { gl::ProgramUniform1ui(self.handle, location, data) };
+    }
+
+    pub fn set_uniform_f32(&self, location: i32, data: f32) {
+        unsafe { gl::ProgramUniform1f(self.handle, location, data) };
     }
 
     pub fn set_uniform_vec2(&self, location: i32, data: Vec2) {

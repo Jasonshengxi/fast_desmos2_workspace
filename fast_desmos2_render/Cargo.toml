@@ -7,8 +7,9 @@ edition = "2021"
 color-eyre = "0.6.3"
 glam = "0.29.2"
 bitflags = "2.6.0"
+okhsl = "1.0.1"
 
+fast_desmos2_tree = { path = "../fast_desmos2_tree" }
 fast_desmos2_fonts = { path = "../fast_desmos2_fonts" }
 fast_desmos2_utils = { path = "../fast_desmos2_utils" }
 fast_desmos2_gl = { path = "../fast_desmos2_gl" }
-okhsl = "1.0.1"

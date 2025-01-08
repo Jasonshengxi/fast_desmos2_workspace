@@ -1,0 +1,10 @@
+[package]
+name = "fast_desmos2_tui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fast_desmos2_tree_parser = { path = "../fast_desmos2_tree_parser" }
+fast_desmos2_tree = { path = "../fast_desmos2_tree" }
+termion = "4.0.3"
+glam = "0.29.2"

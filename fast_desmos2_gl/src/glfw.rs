@@ -1,5 +1,5 @@
 use color_eyre::{eyre::eyre, Result as EyreResult};
-use fast_desmos2_utils::OptExt;
+use fast_desmos2_utils::{OptExt as _, ResExt as _};
 use glam::{DVec2, IVec2};
 use std::{
     cell::RefCell,
@@ -8,7 +8,7 @@ use std::{
 };
 
 use glfw::ffi;
-pub use glfw::{Action, Key, Modifiers};
+pub use glfw::{Action, Key, Modifiers, MouseButton};
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy)]
@@ -121,6 +121,17 @@ impl Window {
             ffi::RELEASE => false,
             _ => unreachable!(),
         }
+    }
+
+    pub fn is_mouse_down(&self, button: MouseButton) -> bool {
+        let status = unsafe {
+            ffi::glfwGetMouseButton(
+                self.window.as_ptr(),
+                std::mem::transmute::<MouseButton, i32>(button),
+            )
+        };
+        const GLFW_PRESS: i32 = 1;
+        status == GLFW_PRESS
     }
 
     pub fn get_mouse_pos(&self) -> DVec2 {

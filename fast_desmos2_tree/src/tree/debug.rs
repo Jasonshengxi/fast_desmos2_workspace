@@ -1,5 +1,4 @@
 use std::fmt::Display;
-#[cfg(feature = "binary")]
 use std::io::Write as _;
 
 use glam::UVec2;
@@ -21,6 +20,7 @@ trait RectStyle {
     const CORNER_DR: char;
 }
 
+//
 // box drawers: ─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾╿
 struct NormalRect;
 impl RectStyle for NormalRect {
@@ -90,7 +90,15 @@ impl CharScreen {
         pos.x as usize + pos.y as usize * self.width
     }
 
-    fn read(&self, pos: UVec2) -> char {
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn read(&self, pos: UVec2) -> char {
         self.screen[self.calc_index(pos)]
     }
 
@@ -123,31 +131,6 @@ impl CharScreen {
             RectStyles::Normal => self.draw_rect::<NormalRect>(offset, size),
             RectStyles::Weak => self.draw_rect::<WeakRect>(offset, size),
         }
-    }
-
-    #[cfg(feature = "binary")]
-    pub fn display_raw(
-        &self,
-        to: &mut termion::raw::RawTerminal<std::io::Stdout>,
-        offset: UVec2,
-    ) -> std::io::Result<()> {
-        use termion::cursor;
-        for y in 0..self.height {
-            let row_start = offset.with_y(offset.y + y as u32);
-            write!(
-                to,
-                "{}",
-                cursor::Goto(row_start.x as u16 + 1, row_start.y as u16 + 1)
-            )?;
-            for x in 0..self.width {
-                write!(
-                    to,
-                    "{}",
-                    self.screen[self.calc_index(UVec2::new(x as u32, y as u32))]
-                )?;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -506,10 +489,9 @@ impl Debugable for EditorTreeSumProd {
         ]);
 
         match (self.cursor(), with_cursor) {
-            (SumProdIndex::Left, true) => DebugTree::horizontal(vec![
-                DebugTree::solid(UVec2::new(1, result.size.y)),
-                result,
-            ]),
+            (SumProdIndex::Left, true) => {
+                DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, result.size.y)), result])
+            }
             _ => result,
         }
     }

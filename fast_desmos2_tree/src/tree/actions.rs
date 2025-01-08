@@ -1,4 +1,7 @@
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    ops::{Bound, RangeBounds},
+};
 
 use crate::tree::{CompletableSurrounds, EditorTreeFraction, EditorTreeKind, FractionIndex};
 
@@ -133,7 +136,10 @@ impl EditorTreeSeq {
                         match action {
                             NotLeftAction::Char(ch) => {
                                 self.children.push(EditorTree::terminal(ch));
-                                self.cursor += 1;
+                                let contracted = self.check_and_contract(self.cursor);
+                                if !contracted {
+                                    self.cursor += 1;
+                                }
                             }
                             NotLeftAction::MakeParen => {
                                 self.children.push(EditorTree::incomplete_paren(
@@ -266,67 +272,8 @@ impl EditorTreeSeq {
                     let new_node = EditorTree::terminal(ch);
                     self.children.insert(index, new_node);
 
-                    fn at_index(children: &[EditorTree], index: usize, string: &str) -> bool {
-                        string.chars().rev().enumerate().all(|(offset, ch)| {
-                            children
-                                .get(index - offset)
-                                .is_some_and(|tree| tree.is_terminal_and_eq(ch))
-                        })
-                    }
-
-                    if at_index(self.children(), index, "sqrt") {
-                        const OFFSET: usize = "sum".len() - 1;
-                        let min_index = index - OFFSET;
-                        self.children.splice(
-                            min_index..=index,
-                            std::iter::once(EditorTree::sqrt(
-                                SurroundIndex::Inside,
-                                EditorTreeSeq::empty(),
-                            )),
-                        );
-
-                        match index.cmp(&self.cursor) {
-                            Ordering::Equal => self.cursor = min_index,
-                            Ordering::Less => self.cursor -= OFFSET,
-                            Ordering::Greater => {}
-                        }
-                    } else if at_index(self.children(), index, "sum") {
-                        const OFFSET: usize = "sum".len() - 1;
-                        let min_index = index - OFFSET;
-                        self.children.splice(
-                            min_index..=index,
-                            std::iter::once(EditorTree::sum(
-                                SumProdIndex::Top,
-                                EditorTreeSeq::str("10"),
-                                EditorTreeSeq::str("1"),
-                                EditorTreeSeq::str("n"),
-                            )),
-                        );
-
-                        match index.cmp(&self.cursor) {
-                            Ordering::Equal => self.move_to(min_index + 1, Direction::Left),
-                            Ordering::Less => self.cursor -= OFFSET,
-                            Ordering::Greater => {}
-                        }
-                    } else if at_index(self.children(), index, "prod") {
-                        const OFFSET: usize = "prod".len() - 1;
-                        let min_index = index - OFFSET;
-                        self.children.splice(
-                            min_index..=index,
-                            std::iter::once(EditorTree::prod(
-                                SumProdIndex::Top,
-                                EditorTreeSeq::str("10"),
-                                EditorTreeSeq::str("1"),
-                                EditorTreeSeq::str("n"),
-                            )),
-                        );
-
-                        match index.cmp(&self.cursor) {
-                            Ordering::Equal => self.move_to(min_index + 1, Direction::Left),
-                            Ordering::Less => self.cursor -= OFFSET,
-                            Ordering::Greater => {}
-                        }
-                    } else {
+                    let contracted = self.check_and_contract(index);
+                    if !contracted {
                         match index.cmp(&self.cursor) {
                             Ordering::Equal => self.move_right(1),
                             Ordering::Less => self.cursor += 1,
@@ -382,6 +329,74 @@ impl EditorTreeSeq {
         } else {
             Some(SeqActionOutcome::LeftOverflow(action))
         }
+    }
+
+    pub fn check_and_contract(&mut self, index: usize) -> bool {
+        fn at_index(children: &[EditorTree], index: usize, string: &str) -> bool {
+            string.chars().rev().enumerate().all(|(offset, ch)| {
+                children
+                    .get(index - offset)
+                    .is_some_and(|tree| tree.is_terminal_and_eq(ch))
+            })
+        }
+
+        if at_index(self.children(), index, "sqrt") {
+            const OFFSET: usize = "sqrt".len() - 1;
+            let min_index = index - OFFSET;
+            self.children.splice(
+                min_index..=index,
+                std::iter::once(EditorTree::sqrt(
+                    SurroundIndex::Inside,
+                    EditorTreeSeq::empty(),
+                )),
+            );
+
+            match index.cmp(&self.cursor) {
+                Ordering::Equal => self.cursor = min_index,
+                Ordering::Less => self.cursor -= OFFSET,
+                Ordering::Greater => {}
+            }
+        } else if at_index(self.children(), index, "sum") {
+            const OFFSET: usize = "sum".len() - 1;
+            let min_index = index - OFFSET;
+            self.children.splice(
+                min_index..=index,
+                std::iter::once(EditorTree::sum(
+                    SumProdIndex::Top,
+                    EditorTreeSeq::str("10"),
+                    EditorTreeSeq::str("1"),
+                    EditorTreeSeq::str("n"),
+                )),
+            );
+
+            match index.cmp(&self.cursor) {
+                Ordering::Equal => self.move_to(min_index + 1, Direction::Left),
+                Ordering::Less => self.cursor -= OFFSET,
+                Ordering::Greater => {}
+            }
+        } else if at_index(self.children(), index, "prod") {
+            const OFFSET: usize = "prod".len() - 1;
+            let min_index = index - OFFSET;
+            self.children.splice(
+                min_index..=index,
+                std::iter::once(EditorTree::prod(
+                    SumProdIndex::Top,
+                    EditorTreeSeq::str("10"),
+                    EditorTreeSeq::str("1"),
+                    EditorTreeSeq::str("n"),
+                )),
+            );
+
+            match index.cmp(&self.cursor) {
+                Ordering::Equal => self.move_to(min_index + 1, Direction::Left),
+                Ordering::Less => self.cursor -= OFFSET,
+                Ordering::Greater => {}
+            }
+        } else {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -533,7 +548,7 @@ impl EditorTree {
                     match outcome? {
                         SeqActionOutcome::LeftDelete => {
                             let old_self = std::mem::replace(self, EditorTree::terminal('X'));
-                            let EditorTreeKind::Paren(paren) = old_self.kind else {
+                            let EditorTreeKind::Sqrt(paren) = old_self.kind else {
                                 unreachable!()
                             };
                             let children = paren.child.children;

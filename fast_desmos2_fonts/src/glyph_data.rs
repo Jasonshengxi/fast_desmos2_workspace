@@ -9,7 +9,7 @@ use crate::layout::GlyphInstance;
 
 use super::fonts::PointVerb;
 use color_eyre::Result as EyreResult;
-use fast_desmos2_utils::OptExt;
+use fast_desmos2_utils::{OptExt as _, ResExt as _};
 use glam::Vec2;
 use skrifa::metrics::{GlyphMetrics, Metrics};
 use skrifa::outline::{DrawSettings, OutlinePen};

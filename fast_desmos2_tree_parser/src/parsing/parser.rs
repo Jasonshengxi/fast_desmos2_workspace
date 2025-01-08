@@ -5,7 +5,7 @@ use winnow::{
     combinator::{
         alt, delimited, eof, opt, preceded, repeat, separated, separated_pair, terminated,
     },
-    error::{ContextError, InputError, StrContext, StrContextValue},
+    error::{ContextError, InputError, StrContext, StrContextValue, TreeError},
     prelude::*,
     token::any,
     Stateful,
@@ -27,7 +27,9 @@ fn derived_input<'a>(from: &ParseInput<'a>, seq: &'a EditorTreeSeq) -> ParseInpu
 
 pub type ParseInput<'a> = Stateful<ParseStream<'a>, ParseExtra<'a>>;
 pub type ParseResult<'a, T> = PResult<T, ParseError<'a>>;
-pub type ParseError<'a> = InputError<ParseInput<'a>>;
+// pub type ParseError<'a> = TreeError<ParseInput<'a>>;
+pub type ParseError<'a> = TreeError<ParseInput<'a>>;
+// pub type ParseError<'a> = ContextError;
 
 pub fn parse_var_def<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, VarDef> {
     (parse_raw_ident, parse_char('='), parse_whole_seq)
@@ -101,7 +103,12 @@ fn parse_postfix<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
 
     fn parse_single_postfix<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Postfix> {
         alt((
-            parse_brackets_chained(parse_seq).map(Postfix::Ind),
+            alt((
+                parse_brackets_chained(parse_seq),
+                parse_brackets_chained(parse_list_literal_inner),
+                parse_brackets_chained(parse_list_range_inner),
+            ))
+            .map(Postfix::Ind),
             parse_power_chained(parse_seq).map(Postfix::Power),
         ))
         .parse_next(input)
@@ -127,10 +134,11 @@ fn parse_everything_else<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Eval
         parse_parens,
         parse_sqrt,
         parse_abs,
-        parse_list_literal,
-        parse_list_range,
         parse_if_else,
         parse_sum_prod,
+        parse_fraction,
+        parse_brackets_chained(parse_list_range_inner),
+        parse_brackets_chained(parse_list_literal_inner),
     ))
     .parse_next(input)
 }
@@ -157,6 +165,21 @@ fn parse_map_char<'a, T>(
     mut map: impl FnMut(char) -> Option<T> + 'static,
 ) -> impl Parser<ParseInput<'a>, T, ParseError<'a>> {
     any.verify_map(move |tree: &EditorTree| tree.is_terminal_and_then(|term| map(term.ch())))
+}
+
+fn parse_fraction<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+    let fraction = any
+        .verify_map(|tree: &EditorTree| match tree.kind() {
+            EditorTreeKind::Fraction(fraction) => Some(fraction),
+            _ => None,
+        })
+        .context(expect_description("a fraction"))
+        .parse_next(input)?;
+
+    let top = parse_whole_seq(&mut derived_input(input, fraction.top()))?;
+    let bottom = parse_whole_seq(&mut derived_input(input, fraction.bottom()))?;
+
+    Ok(EvalNode::fraction(top, bottom))
 }
 
 fn parse_sum_prod<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
@@ -217,27 +240,27 @@ fn parse_if_else<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
 fn parse_conditional<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Conditional> {
     (
         parse_seq,
-        alt((
-            repeat(1.., (parse_char('=').map(|_| CompSet::EQUAL), parse_seq)),
-            repeat(
-                1..,
-                (
+        alt((repeat(
+            1..,
+            (
+                alt((
+                    parse_char('=').map(|_| CompSet::EQUAL),
                     (
                         alt((
                             parse_char('<').map(|_| CompSet::LESS),
                             parse_char('>').map(|_| CompSet::MORE),
-                        ))
-                        .context(expect_description("a symbol for comparison")),
+                        )),
                         opt(parse_char('=')),
                     )
                         .map(|(normal, equal)| match equal {
                             Some(_) => normal.union(CompSet::EQUAL),
                             None => normal,
                         }),
-                    parse_seq,
-                ),
+                ))
+                .context(expect_description("a symbol for comparison")),
+                parse_seq,
             ),
-        )),
+        ),)),
     )
         .context(expect_description("a conditional"))
         .map(|(first, remaining): (_, Vec<_>)| Conditional::new(first, remaining))
@@ -256,10 +279,6 @@ fn parse_list_range_inner<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Eva
         .context(expect_description("a list range"))
         .map(|(from, next, _, _, _, to)| EvalNode::list_range(from, next, to))
         .parse_next(input)
-}
-
-fn parse_list_range<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_brackets_chained(parse_list_range_inner).parse_next(input)
 }
 
 fn parse_ellipsis<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, ()> {
@@ -444,8 +463,8 @@ fn parse_sqrt<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
         .parse_next(input)
 }
 
-fn parse_list_literal<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_brackets_chained(separated(.., parse_seq, parse_char(',')))
+fn parse_list_literal_inner<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+    separated(.., parse_seq, parse_char(','))
         .map(EvalNode::list_literal)
         .context(expect_description("a list literal"))
         .parse_next(input)

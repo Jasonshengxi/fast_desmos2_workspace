@@ -37,6 +37,8 @@ use AccessNature as Nat;
 use super::error::GlErrorGuard;
 impl DataUsage {
     pub const STATIC_DRAW: Self = Self::new(Freq::Static, Nat::Draw);
+    pub const DYNAMIC_DRAW: Self = Self::new(Freq::Dynamic, Nat::Draw);
+    pub const STREAM_DRAW: Self = Self::new(Freq::Stream, Nat::Draw);
 
     pub const fn new(frequency: Freq, nature: Nat) -> Self {
         Self { frequency, nature }
@@ -154,6 +156,17 @@ impl Buffer {
         }
     }
 
+    pub fn realloc<T>(&self, size: usize, usage: DataUsage) {
+        unsafe {
+            gl::NamedBufferData(
+                self.handle,
+                (size * size_of::<T>()) as isize,
+                std::ptr::null(),
+                usage.to_u32(),
+            );
+        }
+    }
+
     pub fn store_in_place<T>(&self, data: &[T]) {
         unsafe {
             gl::NamedBufferSubData(
@@ -177,6 +190,11 @@ impl Buffer {
             buffer: self,
             index,
         }
+    }
+
+    pub fn bind_base_directly(&self, index: u32) {
+        assert!(self.target.can_bind_base());
+        unsafe { gl::BindBufferBase(self.target.to_u32(), index, self.as_handle()) };
     }
 }
 

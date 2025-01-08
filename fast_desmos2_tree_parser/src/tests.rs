@@ -55,10 +55,11 @@ fn parse(tree: impl Into<EditorTreeSeq>) -> (EvalNode, IdentStorerGuard) {
     match parsed {
         Ok(parsed) => (parsed, IdentStorerGuard::new(idents)),
         Err(_err) => {
+            println!("PARSING FAILURE");
+            println!("{_err:#?}");
             let tree = tree.debug(false).render();
-            eprintln!("{tree}");
-            eprintln!("{_err:#?}");
-            panic!("PARSING FAILURE");
+            println!("{tree}");
+            panic!();
         }
     }
 }
@@ -244,6 +245,40 @@ fn test_index() {
     assert_eq!(
         parsed,
         EvalNode::index(EvalNode::number(1.89), EvalNode::number(8.0))
+    )
+}
+
+#[test]
+fn test_index_range() {
+    let (parsed, _) = parse(adjoin(vec![str("1.89"), one(brackets(str("8,8.2...9")))]));
+
+    assert_eq!(
+        parsed,
+        EvalNode::index(
+            EvalNode::number(1.89),
+            EvalNode::list_range(
+                EvalNode::number(8.0),
+                Some(EvalNode::number(8.2)),
+                EvalNode::number(9.0)
+            )
+        )
+    )
+}
+
+#[test]
+fn test_index_literal() {
+    let (parsed, _) = parse(adjoin(vec![str("1.89"), one(brackets(str("9,8,7")))]));
+
+    assert_eq!(
+        parsed,
+        EvalNode::index(
+            EvalNode::number(1.89),
+            EvalNode::list_literal(vec![
+                EvalNode::number(9.0),
+                EvalNode::number(8.0),
+                EvalNode::number(7.0),
+            ])
+        )
     )
 }
 

@@ -1,22 +1,15 @@
-# shell.nix
-{
-  pkgs ? import <nixpkgs> { },
-}:
-pkgs.mkShell {
-  buildInputs = with pkgs; [
-    pkg-config
-    xorg.libX11
-    xorg.libXrandr
-    xorg.libXinerama
-    xorg.libXcursor
-    xorg.libXi
-    libglvnd
-    cmake
-  ];
+{ pkgs ? import <nixpkgs> {} }:
 
-  shellHook = ''
-    export GLFW_PLATFORM=x11
-    export DISPLAY=:1
-    export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH}''${LD_LIBRARY_PATH:+:}${pkgs.libglvnd}/lib"
-  '';
+pkgs.mkShell {
+    # nativeBuildInputs is usually what you want -- tools you need to run
+    buildInputs = with pkgs; [
+        pkg-config
+        xorg.libX11
+        xorg.libXrandr
+        xorg.libXinerama
+        xorg.libXcursor
+        xorg.libXi
+        libglvnd
+        cmake
+    ];
 }
