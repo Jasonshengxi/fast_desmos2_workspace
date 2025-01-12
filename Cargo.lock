@@ -630,6 +630,7 @@ dependencies = [
 name = "fast_desmos2_tui"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.7.0",
  "fast_desmos2_cranelift",
  "fast_desmos2_eval",
  "fast_desmos2_tree",

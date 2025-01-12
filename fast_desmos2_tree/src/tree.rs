@@ -10,6 +10,7 @@ mod movement;
 
 pub trait EditorTreeSeq: Debug + Clone + PartialEq + Sized {
     fn children(&self) -> &[EditorTree<Self>];
+    fn children_mut(&mut self) -> &mut Vec<EditorTree<Self>>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
     fn cursor(&self) -> usize;
@@ -34,6 +35,10 @@ impl Debug for EditorTreeSeqVisual {
 impl EditorTreeSeq for EditorTreeSeqVisual {
     fn children(&self) -> &[EditorTree<Self>] {
         &self.children
+    }
+
+    fn children_mut(&mut self) -> &mut Vec<EditorTree<Self>> {
+        &mut self.children
     }
 
     fn len(&self) -> usize {
@@ -159,6 +164,10 @@ impl EditorTreeSeqNormal {
 impl EditorTreeSeq for EditorTreeSeqNormal {
     fn children(&self) -> &[EditorTree<EditorTreeSeqNormal>] {
         &self.children
+    }
+
+    fn children_mut(&mut self) -> &mut Vec<EditorTree<Self>> {
+        &mut self.children
     }
 
     fn len(&self) -> usize {
@@ -384,7 +393,8 @@ pub enum SurroundIndex {
     Inside,
 }
 
-trait SurroundsTreeSeq: Sealed {
+#[expect(private_bounds)]
+pub trait SurroundsTreeSeq: Sealed {
     type Seq: EditorTreeSeq;
 
     fn cursor(&self) -> SurroundIndex;
@@ -403,7 +413,7 @@ trait SurroundsTreeSeq: Sealed {
     }
 }
 
-trait CompletableSurrounds: SurroundsTreeSeq {
+pub trait CompletableSurrounds: SurroundsTreeSeq {
     fn is_complete(&self) -> bool;
     fn is_complete_mut(&mut self) -> &mut bool;
 }

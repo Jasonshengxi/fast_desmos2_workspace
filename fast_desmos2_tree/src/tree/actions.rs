@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 
-use crate::tree::{CompletableSurrounds, EditorTreeKind, EditorTreeSeq, FractionIndex};
+use crate::tree::{
+    CompletableSurrounds, EditorTreeKind, EditorTreeSeq, FractionIndex, SurroundsTreeSeq,
+};
 
 use super::{
     movement::Direction, EditorTree, EditorTreeSeqNormal, SumProdIndex, SurroundIndex, TreeMovable,
@@ -13,9 +15,16 @@ pub enum TreeAction {
     Char(char),
     MakeFraction,
     MakePower,
-    MakeParen,
-    MakeAbs,
+    MakeGroup(GroupKind),
     Delete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupKind {
+    Paren,
+    Bracket,
+    Abs,
+    Curly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,8 +35,7 @@ pub enum LeftAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotLeftAction {
     Char(char),
-    MakeParen,
-    MakeAbs,
+    MakeGroup(GroupKind),
     MakeFraction,
     MakePower,
 }
@@ -48,8 +56,7 @@ impl TryFrom<TreeAction> for LeftAction {
             TreeAction::MakeFraction => Err(Self::Error::MakeFraction),
             TreeAction::MakePower => Err(Self::Error::MakePower),
             TreeAction::Delete => Ok(Self::Delete),
-            TreeAction::MakeParen => Err(Self::Error::MakeParen),
-            TreeAction::MakeAbs => Err(Self::Error::MakeAbs),
+            TreeAction::MakeGroup(group) => Err(Self::Error::MakeGroup(group)),
             TreeAction::Char(ch) => Err(Self::Error::Char(ch)),
         }
     }
@@ -60,10 +67,23 @@ impl TreeAction {
         match char {
             '/' => Self::MakeFraction,
             '^' => Self::MakePower,
-            '(' => Self::MakeParen,
-            '|' => Self::MakeAbs,
+            '(' => Self::MakeGroup(GroupKind::Paren),
+            '|' => Self::MakeGroup(GroupKind::Abs),
+            '[' => Self::MakeGroup(GroupKind::Bracket),
+            '{' => Self::MakeGroup(GroupKind::Curly),
             '*' => Self::Char('×'),
             otherwise => Self::Char(otherwise),
+        }
+    }
+}
+
+impl GroupKind {
+    pub fn incomplete<S: EditorTreeSeq>(&self, cursor: SurroundIndex, child: S) -> EditorTree<S> {
+        match self {
+            GroupKind::Paren => EditorTree::incomplete_paren(cursor, child),
+            GroupKind::Bracket => EditorTree::incomplete_brackets(cursor, child),
+            GroupKind::Abs => EditorTree::incomplete_abs(cursor, child),
+            GroupKind::Curly => EditorTree::incomplete_curly(cursor, child),
         }
     }
 }
@@ -80,7 +100,9 @@ pub enum ActionOutcome {
     Deleted,
     CaptureCursor,
     MoveRight,
-    Splice(SpliceMethods),
+    ToFraction(SplicedCursor),
+    ExtractElements(GroupKind, usize),
+    Unwrap(Unwrap),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,15 +112,10 @@ pub enum SplicedCursor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpliceMethods {
-    ToFraction(SplicedCursor),
-
+pub enum Unwrap {
     UnwrapPower,
-    UnwrapParen,
-    UnwrapAbs,
-    UnwrapCurly,
-    UnwrapBracket,
     UnwrapSqrt,
+    UnwrapGroup(GroupKind),
 }
 
 macro_rules! left_overflows {
@@ -148,17 +165,11 @@ impl EditorTreeSeqNormal {
                                     self.cursor += 1;
                                 }
                             }
-                            NotLeftAction::MakeParen => {
-                                self.children.push(EditorTree::incomplete_paren(
+                            NotLeftAction::MakeGroup(group) => {
+                                self.children.push(group.incomplete(
                                     SurroundIndex::Inside,
                                     EditorTreeSeqNormal::empty(),
-                                ));
-                            }
-                            NotLeftAction::MakeAbs => {
-                                self.children.push(EditorTree::incomplete_abs(
-                                    SurroundIndex::Inside,
-                                    EditorTreeSeqNormal::empty(),
-                                ));
+                                ))
                             }
                             NotLeftAction::MakeFraction => {
                                 if let Ok(start_index) = self.search_back(self.cursor) {
@@ -188,16 +199,9 @@ impl EditorTreeSeqNormal {
                         self.children.push(EditorTree::terminal(ch));
                         self.cursor = 1;
                     }
-                    Err(NotLeftAction::MakeParen) => {
-                        self.children.push(EditorTree::incomplete_paren(
-                            SurroundIndex::Inside,
-                            EditorTreeSeqNormal::empty(),
-                        ))
-                    }
-                    Err(NotLeftAction::MakeAbs) => self.children.push(EditorTree::incomplete_abs(
-                        SurroundIndex::Inside,
-                        EditorTreeSeqNormal::empty(),
-                    )),
+                    Err(NotLeftAction::MakeGroup(group)) => self.children.push(
+                        group.incomplete(SurroundIndex::Inside, EditorTreeSeqNormal::empty()),
+                    ),
                     Err(NotLeftAction::MakeFraction) => self.children.push(EditorTree::fraction(
                         FractionIndex::Top,
                         EditorTreeSeqNormal::empty(),
@@ -230,6 +234,14 @@ impl EditorTreeSeqNormal {
             ($etk:ident :: $var:ident) => {{
                 let this_node = self.children.remove(index);
                 let $etk::$var(x) = this_node.kind else {
+                    unreachable!()
+                };
+                x
+            }};
+        }
+        macro_rules! splice_mut {
+            ($etk:ident :: $var:ident) => {{
+                let $etk::$var(x) = &mut self.children[index].kind else {
                     unreachable!()
                 };
                 x
@@ -284,26 +296,16 @@ impl EditorTreeSeqNormal {
                     new_node.enter_from(Direction::Left);
                     self.children.insert(index, new_node);
                 }
-                TreeAction::MakeParen => {
+                TreeAction::MakeGroup(group) => {
                     let useful = self.children.drain(index..).collect::<Vec<_>>();
-                    let new_child = EditorTree::incomplete_paren(
-                        SurroundIndex::Inside,
-                        EditorTreeSeqNormal::new(0, useful),
-                    );
-                    self.children.push(new_child);
-                }
-                TreeAction::MakeAbs => {
-                    let useful = self.children.drain(index..).collect::<Vec<_>>();
-                    let new_child = EditorTree::incomplete_abs(
-                        SurroundIndex::Inside,
-                        EditorTreeSeqNormal::new(0, useful),
-                    );
+                    let new_child = group
+                        .incomplete(SurroundIndex::Inside, EditorTreeSeqNormal::new(0, useful));
                     self.children.push(new_child);
                 }
             },
             Some(ActionOutcome::CaptureCursor) => self.cursor = index,
             Some(ActionOutcome::MoveRight) => self.move_right(1),
-            Some(ActionOutcome::Splice(SpliceMethods::ToFraction(cursor))) => {
+            Some(ActionOutcome::ToFraction(cursor)) => {
                 let fraction = splice_extract!(EditorTreeKind::Fraction);
                 let [top, bottom] = [fraction.top, fraction.bottom].map(|x| x.children);
                 let new_cursor = match cursor {
@@ -317,29 +319,50 @@ impl EditorTreeSeqNormal {
                     self.cursor = new_cursor;
                 }
             }
-            Some(ActionOutcome::Splice(SpliceMethods::UnwrapPower)) => {
-                let nodes = (splice_extract!(EditorTreeKind::Power)).power.children;
+            Some(ActionOutcome::Unwrap(splice)) => {
+                let nodes = match splice {
+                    Unwrap::UnwrapPower => splice_extract!(EditorTreeKind::Power).power,
+                    Unwrap::UnwrapGroup(GroupKind::Paren) => {
+                        splice_extract!(EditorTreeKind::Paren).child
+                    }
+                    Unwrap::UnwrapGroup(GroupKind::Abs) => {
+                        splice_extract!(EditorTreeKind::Abs).child
+                    }
+                    Unwrap::UnwrapGroup(GroupKind::Curly) => {
+                        splice_extract!(EditorTreeKind::Curly).child
+                    }
+                    Unwrap::UnwrapGroup(GroupKind::Bracket) => {
+                        splice_extract!(EditorTreeKind::Bracket).child
+                    }
+                    Unwrap::UnwrapSqrt => splice_extract!(EditorTreeKind::Sqrt).child,
+                }
+                .children;
                 self.children.splice(index..index, nodes);
             }
-            Some(ActionOutcome::Splice(SpliceMethods::UnwrapBracket)) => {
-                let nodes = (splice_extract!(EditorTreeKind::Bracket)).child.children;
-                self.children.splice(index..index, nodes);
-            }
-            Some(ActionOutcome::Splice(SpliceMethods::UnwrapParen)) => {
-                let nodes = (splice_extract!(EditorTreeKind::Paren)).child.children;
-                self.children.splice(index..index, nodes);
-            }
-            Some(ActionOutcome::Splice(SpliceMethods::UnwrapCurly)) => {
-                let nodes = (splice_extract!(EditorTreeKind::Curly)).child.children;
-                self.children.splice(index..index, nodes);
-            }
-            Some(ActionOutcome::Splice(SpliceMethods::UnwrapAbs)) => {
-                let nodes = (splice_extract!(EditorTreeKind::Abs)).child.children;
-                self.children.splice(index..index, nodes);
-            }
-            Some(ActionOutcome::Splice(SpliceMethods::UnwrapSqrt)) => {
-                let nodes = (splice_extract!(EditorTreeKind::Sqrt)).child.children;
-                self.children.splice(index..index, nodes);
+            Some(ActionOutcome::ExtractElements(group, count)) => {
+                fn extract<T, S>(tree: &mut T, count: usize) -> Vec<EditorTree<S>>
+                where
+                    T: CompletableSurrounds + SurroundsTreeSeq<Seq = S>,
+                    S: EditorTreeSeq,
+                {
+                    let vec = tree.child_mut().children_mut();
+                    let result = vec
+                        .drain((vec.len() - count)..vec.len())
+                        .collect::<Vec<_>>();
+                    assert_eq!(result.len(), count);
+                    result
+                }
+
+                let extracted = match group {
+                    GroupKind::Paren => extract(splice_mut!(EditorTreeKind::Paren), count),
+                    GroupKind::Bracket => extract(splice_mut!(EditorTreeKind::Bracket), count),
+                    GroupKind::Abs => extract(splice_mut!(EditorTreeKind::Abs), count),
+                    GroupKind::Curly => extract(splice_mut!(EditorTreeKind::Curly), count),
+                };
+                self.children.splice((index + 1)..(index + 1), extracted);
+                if index == self.cursor {
+                    self.move_right(1);
+                }
             }
             None => {}
         }
@@ -429,36 +452,41 @@ impl EditorTreeSeqNormal {
 
 impl EditorTree<EditorTreeSeqNormal> {
     pub fn apply_action(&mut self, action: TreeAction) -> Option<ActionOutcome> {
-        macro_rules! completable_surrounds {
-            ($paren: ident, $etk: ident :: $var: ident, $sm: ident :: $splice: ident) => {
-                match $paren.cursor() {
-                    SurroundIndex::Left => match LeftAction::try_from(action) {
-                        Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
-                        Err(_) => Some(ActionOutcome::Delegated),
-                    },
-                    SurroundIndex::Inside => {
-                        // bracket completion
-                        if (action, $paren.child().cursor())
-                            == (TreeAction::Char(')'), $paren.child().len())
-                        {
-                            *$paren.is_complete_mut() = true;
-                            Some(ActionOutcome::MoveRight)
-                        } else {
-                            let outcome = $paren.child_mut().apply_action(action);
-                            match outcome {
-                                Some(SeqActionOutcome::LeftOverflow(left_action)) => {
-                                    match left_action {
-                                        LeftAction::Delete => {
-                                            Some(ActionOutcome::Splice($sm::$splice))
-                                        }
+        fn apply_completable_surrounds<T>(
+            this: &mut T,
+            action: TreeAction,
+            group: GroupKind,
+        ) -> Option<ActionOutcome>
+        where
+            T: CompletableSurrounds + SurroundsTreeSeq<Seq = EditorTreeSeqNormal>,
+        {
+            match this.cursor() {
+                SurroundIndex::Left => match LeftAction::try_from(action) {
+                    Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
+                    Err(_) => Some(ActionOutcome::Delegated),
+                },
+                SurroundIndex::Inside => {
+                    // bracket completion
+                    if action == TreeAction::Char(')') {
+                        let cursor = this.child().cursor();
+                        let count = this.child().len() - cursor;
+                        *this.is_complete_mut() = true;
+                        Some(ActionOutcome::ExtractElements(group, count))
+                    } else {
+                        let outcome = this.child_mut().apply_action(action);
+                        match outcome {
+                            Some(SeqActionOutcome::LeftOverflow(left_action)) => {
+                                match left_action {
+                                    LeftAction::Delete => {
+                                        Some(ActionOutcome::Unwrap(Unwrap::UnwrapGroup(group)))
                                     }
                                 }
-                                None => None,
                             }
+                            None => None,
                         }
                     }
                 }
-            };
+            }
         }
 
         match &mut self.kind {
@@ -467,33 +495,31 @@ impl EditorTree<EditorTreeSeqNormal> {
                 TreeAction::Char(_)
                 | TreeAction::MakePower
                 | TreeAction::MakeFraction
-                | TreeAction::MakeAbs
-                | TreeAction::MakeParen => Some(ActionOutcome::Delegated),
+                | TreeAction::MakeGroup(_) => Some(ActionOutcome::Delegated),
             },
             EditorTreeKind::Fraction(fraction) => match fraction.cursor() {
                 FractionIndex::Top => {
                     let outcome = fraction.top.apply_action(action);
                     match outcome? {
-                        SeqActionOutcome::LeftDelete => Some(ActionOutcome::Splice(
-                            SpliceMethods::ToFraction(SplicedCursor::Left),
-                        )),
+                        SeqActionOutcome::LeftDelete => {
+                            Some(ActionOutcome::ToFraction(SplicedCursor::Left))
+                        }
                     }
                 }
                 FractionIndex::Bottom => {
                     let outcome = fraction.bottom.apply_action(action);
                     match outcome? {
-                        SeqActionOutcome::LeftDelete => Some(ActionOutcome::Splice(
-                            SpliceMethods::ToFraction(SplicedCursor::Middle),
-                        )),
+                        SeqActionOutcome::LeftDelete => {
+                            Some(ActionOutcome::ToFraction(SplicedCursor::Middle))
+                        }
                     }
                 }
                 FractionIndex::Left => match LeftAction::try_from(action) {
                     Ok(left_action) => Some(ActionOutcome::LeftOverflow(left_action)),
                     Err(action) => match action {
                         NotLeftAction::Char(_)
-                        | NotLeftAction::MakeParen
                         | NotLeftAction::MakePower
-                        | NotLeftAction::MakeAbs
+                        | NotLeftAction::MakeGroup(_)
                         | NotLeftAction::MakeFraction => Some(ActionOutcome::Delegated),
                     },
                 },
@@ -502,7 +528,7 @@ impl EditorTree<EditorTreeSeqNormal> {
                 let outcome = power.power.apply_action(action);
                 match outcome? {
                     SeqActionOutcome::LeftDelete => {
-                        Some(ActionOutcome::Splice(SpliceMethods::UnwrapPower))
+                        Some(ActionOutcome::Unwrap(Unwrap::UnwrapPower))
                     }
                 }
             }
@@ -537,26 +563,20 @@ impl EditorTree<EditorTreeSeqNormal> {
                     let outcome = sqrt.child.apply_action(action);
                     match outcome? {
                         SeqActionOutcome::LeftDelete => {
-                            Some(ActionOutcome::Splice(SpliceMethods::UnwrapSqrt))
+                            Some(ActionOutcome::Unwrap(Unwrap::UnwrapSqrt))
                         }
                     }
                 }
             },
             EditorTreeKind::Paren(paren) => {
-                completable_surrounds!(paren, EditorTreeKind::Paren, SpliceMethods::UnwrapParen)
+                apply_completable_surrounds(paren, action, GroupKind::Paren)
             }
-            EditorTreeKind::Abs(abs) => {
-                completable_surrounds!(abs, EditorTreeKind::Abs, SpliceMethods::UnwrapAbs)
-            }
+            EditorTreeKind::Abs(abs) => apply_completable_surrounds(abs, action, GroupKind::Abs),
             EditorTreeKind::Curly(curly) => {
-                completable_surrounds!(curly, EditorTreeKind::Curly, SpliceMethods::UnwrapCurly)
+                apply_completable_surrounds(curly, action, GroupKind::Curly)
             }
             EditorTreeKind::Bracket(bracket) => {
-                completable_surrounds!(
-                    bracket,
-                    EditorTreeKind::Bracket,
-                    SpliceMethods::UnwrapBracket
-                )
+                apply_completable_surrounds(bracket, action, GroupKind::Bracket)
             }
         }
     }

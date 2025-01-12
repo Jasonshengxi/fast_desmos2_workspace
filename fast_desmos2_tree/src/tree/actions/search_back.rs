@@ -1,4 +1,3 @@
-use fast_desmos2_utils::ResExt;
 use std::fmt::Display;
 
 use thiserror::Error;
@@ -33,9 +32,8 @@ pub enum SearchError {
     #[error("No elements left")]
     RanOut,
 
-    #[deprecated]
-    #[error("Generic Error")]
-    Generic,
+    #[error("FATAL ISSUE: {}", .0)]
+    LogicError(Box<SearchError>),
 }
 pub type SearchResult<T> = Result<T, SearchError>;
 
@@ -74,19 +72,11 @@ impl<S: EditorTreeSeq> SearchState<'_, S> {
         }
         if self.peek().is_some_and(|tree| tree.is_terminal_and_eq('.')) {
             self.advance();
-            none_consumed = true;
             while self
                 .peek()
                 .is_some_and(|tree| tree.is_terminal_and(|term| term.ch.is_ascii_digit()))
             {
                 self.advance();
-                none_consumed = false;
-            }
-            if none_consumed {
-                self.index = original_index;
-                return Err(SearchError::WrongChar {
-                    expect: ExpectCategory::NumberInteger,
-                });
             }
         }
         Ok(())
@@ -119,8 +109,12 @@ impl<S: EditorTreeSeq> SearchState<'_, S> {
     fn advance_item(&mut self) -> SearchResult<()> {
         match &self.peek().ok_or(SearchError::RanOut)?.kind {
             EditorTreeKind::Terminal(term) => match term.ch {
-                'a'..='z' | 'A'..='Z' => self.advance_ident().assert_ok(),
-                '0'..='9' => self.advance_number().assert_ok(),
+                'a'..='z' | 'A'..='Z' => self
+                    .advance_ident()
+                    .map_err(|err| SearchError::LogicError(Box::new(err))),
+                '0'..='9' => self
+                    .advance_number()
+                    .map_err(|err| SearchError::LogicError(Box::new(err))),
                 ch => Err(SearchError::UnknownChar(ch)),
             },
             EditorTreeKind::Power(_) => {
@@ -154,7 +148,7 @@ impl<S: EditorTreeSeq> SearchState<'_, S> {
 }
 
 impl EditorTreeSeqNormal {
-    pub fn search_back(&self, start: usize) -> SearchResult<usize> {
+    fn search_back_impl(&self, start: usize) -> SearchResult<usize> {
         let mut state = SearchState {
             seq: self,
             index: start,
@@ -163,5 +157,15 @@ impl EditorTreeSeqNormal {
         state.advance_pack()?;
 
         Ok(state.index)
+    }
+
+    pub fn search_back(&self, start: usize) -> SearchResult<usize> {
+        match self.search_back_impl(start) {
+            Ok(ok) => Ok(ok),
+            Err(SearchError::LogicError(err)) => {
+                panic!("{err}")
+            }
+            Err(err) => Err(err),
+        }
     }
 }

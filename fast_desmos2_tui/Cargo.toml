@@ -10,3 +10,4 @@ fast_desmos2_tree = { path = "../fast_desmos2_tree" }
 fast_desmos2_cranelift = { path = "../fast_desmos2_cranelift" }
 termion = "4.0.3"
 glam = "0.29.2"
+bitflags = "2.7.0"

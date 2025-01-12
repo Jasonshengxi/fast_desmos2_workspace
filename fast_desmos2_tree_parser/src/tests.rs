@@ -3,7 +3,6 @@ use pretty_assertions::assert_eq;
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 
-use fast_desmos2_tree::tree::debug::Debugable;
 use fast_desmos2_tree::tree::{
     EditorTree, EditorTreeSeq, EditorTreeSeqNormal, SumOrProd, SumProdIndex, SurroundIndex,
 };
@@ -61,8 +60,8 @@ fn parse(tree: impl Into<EditorTreeSeqNormal>) -> (EvalNode, IdentStorerGuard) {
         Err(_err) => {
             println!("PARSING FAILURE");
             println!("{_err:#?}");
-            let tree = tree.debug(false).render();
-            println!("{tree}");
+            // let tree = tree.debug(false).render();
+            // println!("{tree}");
             panic!();
         }
     }

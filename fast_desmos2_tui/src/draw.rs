@@ -1,76 +1,211 @@
 use std::fmt::Display;
-use std::io::Write as _;
 
+use bitflags::bitflags;
 use glam::UVec2;
 
 use fast_desmos2_tree::tree::{
-    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreePower,
-    EditorTreeSeq, EditorTreeSeqNormal, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal,
-    FractionIndex, SumOrProd, SumProdIndex, SurroundIndex,
+    CompletableSurrounds, EditorTree, EditorTreeAbs, EditorTreeBracket, EditorTreeFraction,
+    EditorTreeKind, EditorTreeParen, EditorTreeSeq, EditorTreeSeqNormal, EditorTreeSqrt,
+    EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SumOrProd, SumProdIndex, SurroundIndex,
+    SurroundsTreeSeq,
 };
-
-trait RectStyle {
-    const LINE_Y: char;
-    const LINE_X: char;
-    const CORNER_UL: char;
-    const CORNER_UR: char;
-    const CORNER_DL: char;
-    const CORNER_DR: char;
-}
-
-//
-// box drawers: ─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾╿
-struct NormalRect;
-impl RectStyle for NormalRect {
-    const LINE_Y: char = '│';
-    const LINE_X: char = '─';
-    const CORNER_UL: char = '┌';
-    const CORNER_UR: char = '┐';
-    const CORNER_DL: char = '└';
-    const CORNER_DR: char = '┘';
-}
-
-struct WeakRect;
-impl RectStyle for WeakRect {
-    const LINE_Y: char = '┆';
-    const LINE_X: char = '┄';
-    const CORNER_UL: char = '╭';
-    const CORNER_UR: char = '╮';
-    const CORNER_DL: char = '╰';
-    const CORNER_DR: char = '╯';
-}
-
-// box drawers: ─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾╿
-struct BoldRect;
-impl RectStyle for BoldRect {
-    const LINE_Y: char = '┃';
-    const LINE_X: char = '━';
-    const CORNER_UL: char = '┏';
-    const CORNER_UR: char = '┓';
-    const CORNER_DL: char = '┗';
-    const CORNER_DR: char = '┛';
-}
+use termion::style;
 
 #[derive(Debug, Clone, Copy)]
-pub enum RectStyles {
-    Normal,
-    Bold,
-    Weak,
+pub enum Surrounder {
+    Rectangle,
+
+    Sqrt,
+
+    Abs,
+    Parens,
+    Brackets,
 }
 
-macro_rules! style_get {
-    ($style: ident :: $item: ident) => {
-        match $style {
-            RectStyles::Normal => NormalRect::$item,
-            RectStyles::Bold => BoldRect::$item,
-            RectStyles::Weak => WeakRect::$item,
-        }
+#[derive(Clone, Copy)]
+struct SurroundInfo {
+    top: (Option<char>, Option<char>, Option<char>),
+    middle: (Option<char>, Option<char>),
+    bottom: (Option<char>, Option<char>, Option<char>),
+
+    compressed: (Option<char>, Option<char>),
+}
+
+macro_rules! sn {
+    (.) => {
+        None
     };
+    ($x: expr) => {
+        Some($x)
+    };
+}
+
+macro_rules! surround_info {
+    ($($x: tt)*) => {
+        SurroundInfo::new([$(sn!($x)),*])
+    };
+}
+
+// ─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰╱╲╳╴╵╶╷╸╹╺╻╼╽╾╿
+impl SurroundInfo {
+    const RECTANGLE: Self = surround_info!(
+        '┌''─''┐'
+        '│'   '│'
+        '└''─''┘'
+
+        '['   ']'
+    );
+    const SQRT: Self = surround_info!(
+        '┌''─''─'
+        '│'    .
+        '│' .  .
+
+        '√'    .
+    );
+    const BRACKETS: Self = surround_info!(
+        '┌' . '┐'
+        '│'   '│'
+        '└' . '┘'
+
+        '['   ']'
+    );
+    const ABS: Self = surround_info!(
+        '│' . '│'
+        '│'   '│'
+        '│' . '│'
+
+        '|'   '|'
+    );
+    const PARENS: Self = surround_info!(
+        '╭' . '╮'
+        '│'   '│'
+        '╰' . '╯'
+
+        '('   ')'
+    );
+
+    const fn new([a, b, c, d, e, f, g, h, i, j]: [Option<char>; 10]) -> Self {
+        Self {
+            top: (a, b, c),
+            middle: (d, e),
+            bottom: (f, g, h),
+            compressed: (i, j),
+        }
+    }
+}
+
+impl Surrounder {
+    const fn offset(&self) -> UVec2 {
+        match self {
+            Surrounder::Rectangle | Surrounder::Sqrt => UVec2::ONE,
+            Surrounder::Abs | Surrounder::Parens | Surrounder::Brackets => UVec2::X,
+        }
+    }
+
+    const fn size(&self) -> UVec2 {
+        match self {
+            Surrounder::Rectangle => UVec2::splat(2),
+            Surrounder::Sqrt => UVec2::ONE,
+            Surrounder::Abs | Surrounder::Parens | Surrounder::Brackets => UVec2::new(2, 0),
+        }
+    }
+
+    const fn surround_info(&self) -> SurroundInfo {
+        match self {
+            Surrounder::Rectangle => SurroundInfo::RECTANGLE,
+            Surrounder::Sqrt => SurroundInfo::SQRT,
+            Surrounder::Abs => SurroundInfo::ABS,
+            Surrounder::Parens => SurroundInfo::PARENS,
+            Surrounder::Brackets => SurroundInfo::BRACKETS,
+        }
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct SurroundComponent: u8 {
+        const TOP_LEFT     = 0b00000001;
+        const TOP          = 0b00000010;
+        const TOP_RIGHT    = 0b00000100;
+        const LEFT         = 0b00001000;
+        const RIGHT        = 0b00010000;
+        const BOTTOM_LEFT  = 0b00100000;
+        const BOTTOM       = 0b01000000;
+        const BOTTOM_RIGHT = 0b10000000;
+
+        const LEFT_EDGE    = 0b00101001;
+        const RIGHT_EDGE   = 0b10010100;
+        const TOP_EDGE     = 0b00000111;
+        const BOTTOM_EDGE  = 0b11100000;
+
+        const BOTH_EDGES   = 0b10111101;
+    }
+}
+
+type Boldness = SurroundComponent;
+type Inverted = SurroundComponent;
+
+#[derive(Debug, Clone, Copy)]
+pub struct Pixel {
+    ch: char,
+    bold: bool,
+    invert: bool,
+}
+
+impl Display for Pixel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.bold {
+            write!(f, "{}", style::Bold)?;
+        }
+        if self.invert {
+            write!(f, "{}", style::Invert)?;
+        }
+        write!(f, "{}{}", self.ch, style::Reset)
+    }
+}
+
+impl Pixel {
+    pub const fn new(ch: char, bold: bool, invert: bool) -> Self {
+        Self { ch, bold, invert }
+    }
+
+    const DEFAULT: Self = Pixel {
+        ch: ' ',
+        bold: false,
+        invert: false,
+    };
+
+    const fn normal(ch: char) -> Self {
+        Self {
+            ch,
+            bold: false,
+            invert: false,
+        }
+    }
+    //
+    // const fn bold(ch: char) -> Self {
+    //     Self { ch, bold: true }
+    // }
+}
+
+trait Pixelable {
+    fn pixel(self) -> Pixel;
+    // fn bold(self) -> Pixel;
+}
+
+impl Pixelable for char {
+    fn pixel(self) -> Pixel {
+        Pixel::normal(self)
+    }
+    //
+    // fn bold(self) -> Pixel {
+    //     Pixel::bold(self)
+    // }
 }
 
 #[derive(Debug)]
 pub struct CharScreen {
-    screen: Vec<char>,
+    screen: Vec<Pixel>,
     width: usize,
     height: usize,
 }
@@ -78,7 +213,7 @@ pub struct CharScreen {
 impl CharScreen {
     fn new(width: usize, height: usize) -> Self {
         Self {
-            screen: vec![' '; width * height],
+            screen: vec![Pixel::DEFAULT; width * height],
             width,
             height,
         }
@@ -96,38 +231,52 @@ impl CharScreen {
         self.height
     }
 
-    pub fn read(&self, pos: UVec2) -> char {
+    pub fn read(&self, pos: UVec2) -> Pixel {
         self.screen[self.calc_index(pos)]
     }
 
-    fn write(&mut self, pos: UVec2, char: char) {
+    fn write(&mut self, pos: UVec2, char: Pixel) {
         let index = self.calc_index(pos);
         self.screen[index] = char;
     }
 
-    fn draw_rect<S: RectStyle>(&mut self, offset: UVec2, size: UVec2) {
-        let outer = offset + size - 1;
-        self.write(offset, S::CORNER_UL);
-        self.write(offset.with_x(outer.x), S::CORNER_UR);
-        self.write(offset.with_y(outer.y), S::CORNER_DL);
-        self.write(outer, S::CORNER_DR);
+    fn draw_rect(
+        &mut self,
+        offset: UVec2,
+        size: UVec2,
+        style: Surrounder,
+        bold: Boldness,
+        inverted: Inverted,
+    ) {
+        let info = style.surround_info();
+        let outer = offset + size - UVec2::ONE;
 
-        for x in (offset.x + 1)..outer.x {
-            self.write(offset.with_x(x), S::LINE_X);
-            self.write(outer.with_x(x), S::LINE_X);
-        }
+        let mut write = |at: UVec2, ch: Option<char>, subset: Boldness| {
+            if let Some(ch) = ch {
+                self.write(
+                    at,
+                    Pixel::new(ch, bold.contains(subset), inverted.contains(subset)),
+                );
+            }
+        };
 
-        for y in (offset.y + 1)..outer.y {
-            self.write(offset.with_y(y), S::LINE_Y);
-            self.write(outer.with_y(y), S::LINE_Y);
-        }
-    }
+        if size.y == 1 {
+            write(offset, info.compressed.0, Boldness::LEFT_EDGE);
+            write(outer, info.compressed.1, Boldness::RIGHT_EDGE);
+        } else {
+            for x in (offset.x + 1)..=(outer.x - 1) {
+                write(offset.with_x(x), info.top.1, Boldness::TOP);
+                write(outer.with_x(x), info.bottom.1, Boldness::BOTTOM);
+            }
+            for y in (offset.y + 1)..=(outer.y - 1) {
+                write(offset.with_y(y), info.middle.0, Boldness::LEFT);
+                write(outer.with_y(y), info.middle.1, Boldness::RIGHT);
+            }
 
-    fn draw_rect_styled(&mut self, offset: UVec2, size: UVec2, style: RectStyles) {
-        match style {
-            RectStyles::Bold => self.draw_rect::<BoldRect>(offset, size),
-            RectStyles::Normal => self.draw_rect::<NormalRect>(offset, size),
-            RectStyles::Weak => self.draw_rect::<WeakRect>(offset, size),
+            write(offset, info.top.0, Boldness::TOP_LEFT);
+            write(offset.with_x(outer.x), info.top.2, Boldness::TOP_RIGHT);
+            write(offset.with_y(outer.y), info.bottom.0, Boldness::BOTTOM_LEFT);
+            write(outer, info.bottom.2, Boldness::BOTTOM_RIGHT);
         }
     }
 }
@@ -137,8 +286,8 @@ impl Display for CharScreen {
         for y in 0..self.height {
             let row_offset = y * self.width;
             for x in 0..self.width {
-                let char = self.screen[x + row_offset];
-                write!(f, "{}", char)?;
+                let pixel = self.screen[x + row_offset];
+                write!(f, "{}", pixel)?;
             }
             writeln!(f)?;
         }
@@ -155,20 +304,12 @@ pub struct DebugTree {
 
 #[derive(Debug)]
 pub enum DebugTreeKind {
-    Empty,
     Solid,
     Placeholder,
-    HorizontalBar(RectStyles),
+    HorizontalBar(Surrounder),
     Char(char),
     TwoChar([char; 2]),
-    Text(String),
-    SqrtShape(RectStyles, Box<DebugTree>),
-    Brackets {
-        left: RectStyles,
-        right: RectStyles,
-        child: Box<DebugTree>,
-    },
-    BoxAround(RectStyles, Box<DebugTree>),
+    Surrounds(Surrounder, Boldness, Inverted, Box<DebugTree>),
     Children(Vec<DebugTree>),
 }
 
@@ -184,87 +325,32 @@ impl DebugTree {
             DebugTreeKind::Solid => {
                 for y in 0..self.size.y {
                     for x in 0..self.size.x {
-                        screen.write(UVec2::new(x, y) + offset, '█');
+                        screen.write(UVec2::new(x, y) + offset, '█'.pixel());
                     }
                 }
             }
-            DebugTreeKind::Placeholder => screen.write(offset, '𑑛'),
-            DebugTreeKind::HorizontalBar(style) => {
+            DebugTreeKind::Placeholder => screen.write(offset, '𑑛'.pixel()),
+            DebugTreeKind::HorizontalBar(surrounder) => {
                 assert_eq!(self.size.y, 1);
                 for x in 0..self.size.x {
-                    screen.write(UVec2::new(x, 0) + offset, style_get!(style::LINE_X));
-                }
-            }
-            DebugTreeKind::Text(ref string) => {
-                screen.write(offset, '[');
-                let mut len = 0;
-                for (index, char) in string.chars().enumerate() {
-                    screen.write(UVec2::new(index as u32, 0) + UVec2::X + offset, char);
-                    len = index;
-                }
-                screen.write(UVec2::new(len as u32 + 2, 0) + offset, ']');
-            }
-            DebugTreeKind::BoxAround(style, ref child) => {
-                screen.draw_rect_styled(offset, self.size, style);
-                child.render_to(screen, offset + child.offset);
-            }
-            DebugTreeKind::SqrtShape(style, ref child) => {
-                child.render_to(screen, offset + child.offset);
-
-                let outer = offset + self.size - 1;
-                for x in (offset.x)..=(outer.x) {
-                    screen.write(offset.with_x(x), style_get!(style::LINE_X));
-                }
-                for y in (offset.y)..=(outer.y) {
-                    screen.write(offset.with_y(y), style_get!(style::LINE_Y));
-                }
-                screen.write(offset, style_get!(style::CORNER_UL));
-            }
-            DebugTreeKind::Brackets {
-                left,
-                right,
-                ref child,
-            } => {
-                child.render_to(screen, offset + child.offset);
-
-                let outer = offset + self.size - 1;
-                if self.size.y == 1 {
                     screen.write(
-                        offset,
-                        match left {
-                            RectStyles::Normal => todo!(),
-                            RectStyles::Bold => '[',
-                            RectStyles::Weak => '(',
-                        },
+                        UVec2::new(x, 0) + offset,
+                        surrounder.surround_info().top.1.unwrap().pixel(),
                     );
-                    screen.write(
-                        outer,
-                        match right {
-                            RectStyles::Normal => todo!(),
-                            RectStyles::Bold => ']',
-                            RectStyles::Weak => ')',
-                        },
-                    );
-                } else {
-                    for y in (offset.y + 1)..=(outer.y - 1) {
-                        screen.write(offset.with_y(y), style_get!(left::LINE_Y));
-                        screen.write(outer.with_y(y), style_get!(right::LINE_Y));
-                    }
-                    screen.write(offset, style_get!(left::CORNER_UL));
-                    screen.write(offset.with_y(outer.y), style_get!(left::CORNER_DL));
-                    screen.write(outer, style_get!(right::CORNER_DR));
-                    screen.write(offset.with_x(outer.x), style_get!(right::CORNER_UR));
                 }
             }
-            DebugTreeKind::Empty => {}
-            DebugTreeKind::Char(ch) => screen.write(offset, ch),
+            DebugTreeKind::Char(ch) => screen.write(offset, ch.pixel()),
             DebugTreeKind::TwoChar([ch1, ch2]) => {
-                screen.write(offset, ch1);
-                screen.write(offset + UVec2::X, ch2);
+                screen.write(offset, ch1.pixel());
+                screen.write(offset + UVec2::X, ch2.pixel());
             }
             DebugTreeKind::Children(ref children) => children
                 .iter()
                 .for_each(|child| child.render_to(screen, offset + child.offset)),
+            DebugTreeKind::Surrounds(surrounder, boldness, inverted, ref child) => {
+                child.render_to(screen, offset + child.offset);
+                screen.draw_rect(offset, self.size, surrounder, boldness, inverted);
+            }
         }
     }
 }
@@ -278,44 +364,21 @@ impl DebugTree {
         }
     }
 
-    pub fn boxed(mut self, style: RectStyles) -> Self {
-        self.offset += UVec2::ONE;
-        Self::new(
-            self.size + UVec2::splat(2),
-            DebugTreeKind::BoxAround(style, Box::new(self)),
-        )
+    pub fn surrounded(mut self, by: Surrounder, boldness: Boldness, inverted: Inverted) -> Self {
+        self.offset += by.offset();
+        Self {
+            size: self.size + by.size(),
+            offset: UVec2::ZERO,
+            kind: DebugTreeKind::Surrounds(by, boldness, inverted, Box::new(self)),
+        }
     }
 
-    pub fn bracketed(mut self, left: RectStyles, right: RectStyles) -> Self {
-        self.offset += UVec2::X;
-        Self::new(
-            self.size + UVec2::new(2, 0),
-            DebugTreeKind::Brackets {
-                left,
-                right,
-                child: Box::new(self),
-            },
-        )
-    }
-
-    pub fn sqrt(mut self, style: RectStyles) -> Self {
-        self.offset += UVec2::ONE;
-        Self::new(
-            self.size + UVec2::ONE,
-            DebugTreeKind::SqrtShape(style, Box::new(self)),
-        )
-    }
-
-    pub const fn horizontal_bar(width: u32, style: RectStyles) -> Self {
+    pub const fn horizontal_bar(width: u32, style: Surrounder) -> Self {
         Self::new(UVec2::new(width, 1), DebugTreeKind::HorizontalBar(style))
     }
 
     pub const fn solid(size: UVec2) -> Self {
         Self::new(size, DebugTreeKind::Solid)
-    }
-
-    pub const fn empty(size: UVec2) -> Self {
-        Self::new(size, DebugTreeKind::Empty)
     }
 
     pub const fn char(ch: char) -> Self {
@@ -328,13 +391,6 @@ impl DebugTree {
 
     pub const fn char2(chars: [char; 2]) -> Self {
         Self::new(UVec2::new(2, 1), DebugTreeKind::TwoChar(chars))
-    }
-
-    pub fn text(string: String) -> Self {
-        Self::new(
-            UVec2::new(string.chars().count() as u32 + 2, 1),
-            DebugTreeKind::Text(string),
-        )
     }
 
     pub fn horizontal(mut vec: Vec<DebugTree>) -> Self {
@@ -405,12 +461,6 @@ impl Debugable for EditorTreeTerminal {
     }
 }
 
-impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreePower<S> {
-    fn debug(&self, with_cursor: bool) -> DebugTree {
-        self.power().debug(with_cursor).boxed(RectStyles::Bold)
-    }
-}
-
 impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeFraction<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         let top = self
@@ -419,7 +469,7 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeFraction<S> {
         let bottom = self
             .bottom()
             .debug(with_cursor && self.cursor() == FractionIndex::Bottom);
-        let bar = DebugTree::horizontal_bar(top.size.x.max(bottom.size.x), RectStyles::Bold);
+        let bar = DebugTree::horizontal_bar(top.size.x.max(bottom.size.x), Surrounder::Rectangle);
 
         let tree = DebugTree::vertical(vec![top, bar, bottom]);
 
@@ -432,24 +482,55 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeFraction<S> {
     }
 }
 
+fn debug_completable_surrounds<T, S>(
+    tree: &T,
+    with_cursor: bool,
+    surrounder: Surrounder,
+) -> DebugTree
+where
+    T: CompletableSurrounds + SurroundsTreeSeq<Seq = S>,
+    S: EditorTreeSeq + Debugable,
+{
+    let debug_tree = tree
+        .child()
+        .debug(with_cursor && tree.cursor() == SurroundIndex::Inside)
+        .surrounded(
+            surrounder,
+            match tree.is_complete() {
+                true => Boldness::empty(),
+                false => Boldness::empty(),
+            },
+            match tree.is_complete() {
+                true => Inverted::empty(),
+                false => Inverted::RIGHT_EDGE,
+            },
+        );
+
+    if with_cursor && tree.cursor() == SurroundIndex::Left {
+        DebugTree::horizontal(vec![
+            DebugTree::solid(UVec2::new(1, debug_tree.size.y)),
+            debug_tree,
+        ])
+    } else {
+        debug_tree
+    }
+}
+
 impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeParen<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
-        let tree = self
-            .child()
-            .debug(with_cursor && self.cursor() == SurroundIndex::Inside)
-            .bracketed(
-                RectStyles::Bold,
-                match self.is_complete() {
-                    true => RectStyles::Bold,
-                    false => RectStyles::Weak,
-                },
-            );
+        debug_completable_surrounds(self, with_cursor, Surrounder::Parens)
+    }
+}
 
-        if with_cursor && self.cursor() == SurroundIndex::Left {
-            DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, tree.size.y)), tree])
-        } else {
-            tree
-        }
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeAbs<S> {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        debug_completable_surrounds(self, with_cursor, Surrounder::Abs)
+    }
+}
+
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeBracket<S> {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        debug_completable_surrounds(self, with_cursor, Surrounder::Brackets)
     }
 }
 
@@ -458,7 +539,7 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeSqrt<S> {
         let tree = self
             .child()
             .debug(with_cursor && self.cursor() == SurroundIndex::Inside)
-            .sqrt(RectStyles::Normal);
+            .surrounded(Surrounder::Sqrt, Boldness::all(), Inverted::empty());
         if with_cursor && self.cursor() == SurroundIndex::Left {
             DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, tree.size.y)), tree])
         } else {
@@ -499,12 +580,12 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTree<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         match self.kind() {
             EditorTreeKind::Terminal(term) => term.debug(with_cursor),
-            EditorTreeKind::Power(power) => power.debug(with_cursor),
+            EditorTreeKind::Power(_) => todo!(),
             EditorTreeKind::Fraction(fraction) => fraction.debug(with_cursor),
             EditorTreeKind::Sqrt(sqrt) => sqrt.debug(with_cursor),
             EditorTreeKind::Paren(paren) => paren.debug(with_cursor),
-            EditorTreeKind::Abs(_) => todo!(),
-            EditorTreeKind::Bracket(_) => todo!(),
+            EditorTreeKind::Abs(abs) => abs.debug(with_cursor),
+            EditorTreeKind::Bracket(bracket) => bracket.debug(with_cursor),
             EditorTreeKind::Curly(_) => todo!(),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.debug(with_cursor),
         }
