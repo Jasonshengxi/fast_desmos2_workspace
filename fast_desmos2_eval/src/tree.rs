@@ -49,11 +49,18 @@ impl EvalNode {
     }
 
     pub fn multiply(nodes: Vec<Self>) -> Self {
-        Self::new(EvalKind::Multiply(nodes))
+        match <[_; 1]>::try_from(nodes) {
+            Ok([expr]) => expr,
+            Err(nodes) => Self::new(EvalKind::Multiply(nodes)),
+        }
     }
 
     pub fn index(expr: Self, index: Self) -> Self {
         Self::new(EvalKind::ListIndexing { expr, index })
+    }
+
+    pub fn element(expr: Self, element: Element) -> Self {
+        Self::new(EvalKind::ElemAccess { expr, element })
     }
 
     pub fn power(base: Self, power: Self) -> Self {
@@ -65,7 +72,11 @@ impl EvalNode {
     }
 
     pub fn add_sub(pairs: Vec<(AddOrSub, Self)>) -> Self {
-        Self::new(EvalKind::AddSub(pairs))
+        match <[_; 1]>::try_from(pairs) {
+            Ok([(AddOrSub::Add, expr)]) => expr,
+            Ok([pair]) => Self::new(EvalKind::AddSub(vec![pair])),
+            Err(vec) => Self::new(EvalKind::AddSub(vec)),
+        }
     }
 
     pub fn if_else(conds: Vec<Conditional>, yes: Option<EvalNode>, no: Option<EvalNode>) -> Self {
@@ -134,7 +145,7 @@ impl IdentStorer {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct IdentId(usize);
 
 impl IdentId {

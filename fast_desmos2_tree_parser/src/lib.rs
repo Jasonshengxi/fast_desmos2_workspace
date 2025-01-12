@@ -1,8 +1,8 @@
-pub mod builtins;
+#![allow(unused)]
+
 mod parsing;
-pub mod tree;
 
 pub use parsing::parse;
 
-#[cfg(test)]
-mod tests;
+#[cfg(any(test, feature = "binary"))]
+pub mod tests;

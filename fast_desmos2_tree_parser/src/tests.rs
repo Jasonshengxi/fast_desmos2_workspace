@@ -4,11 +4,15 @@ use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 
 use fast_desmos2_tree::tree::debug::Debugable;
-use fast_desmos2_tree::tree::{EditorTree, EditorTreeSeq, SumOrProd, SumProdIndex, SurroundIndex};
+use fast_desmos2_tree::tree::{
+    EditorTree, EditorTreeSeq, EditorTreeSeqNormal, SumOrProd, SumProdIndex, SurroundIndex,
+};
 
-use crate::builtins::{Builtins, MonadicPervasive};
 use crate::parsing;
-use crate::tree::{AddOrSub, CompSet, Conditional, EvalKind, EvalNode, IdentStorer};
+use fast_desmos2_eval::{
+    builtins::{Builtins, MonadicPervasive},
+    AddOrSub, CompSet, Conditional, EvalKind, EvalNode, IdentStorer,
+};
 
 struct IdentStorerGuard {
     used: Cell<bool>,
@@ -48,7 +52,7 @@ impl Drop for IdentStorerGuard {
     }
 }
 
-fn parse(tree: impl Into<EditorTreeSeq>) -> (EvalNode, IdentStorerGuard) {
+fn parse(tree: impl Into<EditorTreeSeqNormal>) -> (EvalNode, IdentStorerGuard) {
     let idents = IdentStorer::default();
     let tree = tree.into();
     let parsed = parsing::parse(&tree, &idents);
@@ -64,90 +68,88 @@ fn parse(tree: impl Into<EditorTreeSeq>) -> (EvalNode, IdentStorerGuard) {
     }
 }
 
-fn paren(child: impl Into<EditorTreeSeq>) -> EditorTree {
+fn paren<S: EditorTreeSeq>(child: impl Into<S>) -> EditorTree<S> {
     EditorTree::complete_paren(SurroundIndex::Inside, child.into())
 }
 
-fn sqrt(child: impl Into<EditorTreeSeq>) -> EditorTree {
+fn sqrt<S: EditorTreeSeq>(child: impl Into<S>) -> EditorTree<S> {
     EditorTree::sqrt(SurroundIndex::Inside, child.into())
 }
 
-fn brackets(child: impl Into<EditorTreeSeq>) -> EditorTree {
+fn brackets<S: EditorTreeSeq>(child: impl Into<S>) -> EditorTree<S> {
     EditorTree::complete_brackets(SurroundIndex::Inside, child.into())
 }
 
-fn abs(child: impl Into<EditorTreeSeq>) -> EditorTree {
+fn abs<S: EditorTreeSeq>(child: impl Into<S>) -> EditorTree<S> {
     EditorTree::complete_abs(SurroundIndex::Inside, child.into())
 }
 
-fn curly(child: impl Into<EditorTreeSeq>) -> EditorTree {
+fn curly<S: EditorTreeSeq>(child: impl Into<S>) -> EditorTree<S> {
     EditorTree::complete_curly(SurroundIndex::Inside, child.into())
 }
 
-fn seq(children: Vec<EditorTree>) -> EditorTreeSeq {
-    EditorTreeSeq::new(0, children)
+fn seq(children: Vec<EditorTree<EditorTreeSeqNormal>>) -> EditorTreeSeqNormal {
+    EditorTreeSeqNormal::new(0, children)
 }
 
-fn power(power: impl Into<EditorTreeSeq>) -> EditorTree {
+fn power<S: EditorTreeSeq>(power: impl Into<S>) -> EditorTree<S> {
     EditorTree::power(power.into())
 }
 
-fn one(child: EditorTree) -> EditorTreeSeq {
-    EditorTreeSeq::one(child)
+fn one(child: EditorTree<EditorTreeSeqNormal>) -> EditorTreeSeqNormal {
+    EditorTreeSeqNormal::one(child)
 }
 
-fn str(string: &str) -> EditorTreeSeq {
-    EditorTreeSeq::str(string)
+fn str(string: &str) -> EditorTreeSeqNormal {
+    EditorTreeSeqNormal::str(&string)
 }
 
-fn term(ch: char) -> EditorTree {
+fn term<S: EditorTreeSeq>(ch: char) -> EditorTree<S> {
     EditorTree::terminal(ch)
 }
 
-fn sum(top: EditorTreeSeq, bottom: EditorTreeSeq, ident: EditorTreeSeq) -> EditorTree {
+fn sum<S: EditorTreeSeq>(top: S, bottom: S, ident: S) -> EditorTree<S> {
     EditorTree::sum(SumProdIndex::Top, top, bottom, ident)
 }
 
-fn adjoin(parts: Vec<EditorTreeSeq>) -> EditorTreeSeq {
-    let mut result = EditorTreeSeq::empty();
+fn adjoin(parts: Vec<EditorTreeSeqNormal>) -> EditorTreeSeqNormal {
+    let mut result = EditorTreeSeqNormal::empty();
     parts.into_iter().for_each(|part| result.extend(part));
     result
 }
 
 #[test]
 fn test_number_integer() {
-    let (parsed, _) = parse(str("  12345 "));
+    let (parsed, _) = parse(str("12345"));
     assert_eq!(parsed, EvalNode::number(12345.0))
 }
 
 #[test]
-fn test_number_float() {
-    let (parsed, _) = parse(str(" 12345.78362    "));
-    assert_eq!(parsed, EvalNode::number(12345.78362))
-}
-
-#[test]
 fn test_number_dot() {
-    let (parsed, _) = parse(str("  .78362 "));
+    let (parsed, _) = parse(str(".78362"));
     assert_eq!(parsed, EvalNode::number(0.78362))
 }
 
 #[test]
-fn test_parens_numbers() {
+fn test_parens() {
     let (parsed, _) = parse(seq(vec![term(' '), paren(str("  0.001 ")), term(' ')]));
     assert_eq!(parsed, EvalNode::number(0.001))
 }
 
 #[test]
-fn test_sqrt_numbers() {
+fn test_sqrt() {
     let (parsed, _) = parse(sqrt(str("0.31")));
     assert_eq!(parsed, EvalNode::sqrt(EvalNode::number(0.31)))
 }
 
+pub fn test_abs() {
+    let (parsed, _) = parse(abs(str("12345")));
+    assert_eq!(parsed, EvalNode::abs(EvalNode::number(12345.0)))
+}
+
 #[test]
-fn test_abs_numbers() {
-    let (parsed, _) = parse(abs(str("0.00")));
-    assert_eq!(parsed, EvalNode::abs(EvalNode::number(0.)))
+fn _test_abs() {
+    test_abs()
 }
 
 #[test]

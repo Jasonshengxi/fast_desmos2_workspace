@@ -1,5 +1,6 @@
 #![allow(unused, clippy::self_named_constructors)]
 
+use std::cell::{LazyCell, RefCell};
 use std::io::{ErrorKind, Read, Write};
 use std::mem::replace;
 use std::net::{Ipv4Addr, TcpListener, TcpStream, ToSocketAddrs};
@@ -8,9 +9,9 @@ use std::sync::mpsc::TryRecvError;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{io, thread};
-pub use value::{List, Serde, TypeMismatch, Value};
+use uiua::Value;
 
-pub mod value;
+pub const DEFAULT_PORT: u16 = 45459;
 
 #[cfg(feature = "server")]
 pub enum Server {
@@ -23,11 +24,15 @@ pub enum Server {
 
 #[cfg(feature = "server")]
 impl Server {
-    pub fn new_local(port: u16) -> io::Result<Self> {
-        Self::new((Ipv4Addr::LOCALHOST, port))
+    pub fn new() -> Self {
+        Self::new_local(DEFAULT_PORT).unwrap()
     }
 
-    pub fn new<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
+    pub fn new_local(port: u16) -> io::Result<Self> {
+        Self::new_from_addr((Ipv4Addr::LOCALHOST, port))
+    }
+
+    pub fn new_from_addr<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
         let listener = TcpListener::bind(addr)?;
         let (tx, rx) = mpsc::channel();
         let join_handle = thread::spawn(move || {
@@ -49,7 +54,7 @@ impl Server {
                 let mut value = Vec::new();
                 bail!(conn.read_to_end(&mut value));
 
-                let value = Value::deserialize(&value);
+                let value = bincode::deserialize(&value).unwrap();
                 bail!(tx.send(value).map_err(io::Error::other));
             }
         });
@@ -94,12 +99,43 @@ impl Server {
 }
 
 #[cfg(feature = "client")]
-pub fn send_value_raw<A: ToSocketAddrs>(to: A, numbers: Value) -> io::Result<()> {
-    let mut conn = TcpStream::connect(to)?;
-    conn.write_all(&numbers.serialize())
+struct Connection {
+    conn: TcpStream,
 }
 
 #[cfg(feature = "client")]
-pub fn send_value_local(to: u16, numbers: Value) -> io::Result<()> {
-    send_value_raw((Ipv4Addr::LOCALHOST, to), numbers)
+impl Connection {
+    pub fn new() -> Self {
+        Self::new_local(DEFAULT_PORT).unwrap()
+    }
+
+    pub fn new_local(port: u16) -> io::Result<Self> {
+        Self::new_from_addr((Ipv4Addr::LOCALHOST, port))
+    }
+
+    pub fn new_from_addr<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
+        let conn = TcpStream::connect(addr)?;
+        Ok(Self { conn })
+    }
+
+    pub fn send_value(&mut self, value: &Value) -> io::Result<()> {
+        bincode::serialize_into(&mut self.conn, &value).map_err(|err| match *err {
+            bincode::ErrorKind::Io(io) => io,
+            other => unreachable!("other serialization error: {other}"),
+        })
+    }
+}
+
+thread_local! {
+    static CONNECTION: LazyCell<RefCell<Connection>> = LazyCell::new(|| {
+        println!("[fast_desmos2_comms] Initiating global connection...");
+        let result = RefCell::new(Connection::new());
+        println!("[fast_desmos2_comms] Initiated.");
+        result
+    });
+}
+
+#[cfg(feature = "client")]
+pub fn send_value(numbers: Value) {
+    CONNECTION.with(|connection| connection.borrow_mut().send_value(&numbers));
 }

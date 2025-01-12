@@ -1,8 +1,9 @@
-use crate::tree::SumProdIndex;
+use crate::{tree::SumProdIndex, Sealed};
 
 use super::{
     EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreePower, EditorTreeSeq,
-    EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SurroundIndex, SurroundsTreeSeq,
+    EditorTreeSeqNormal, EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SurroundIndex,
+    SurroundsTreeSeq,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +47,7 @@ pub trait TreeMovable {
     fn enter_from(&mut self, direction: Direction);
 }
 
-impl TreeMovable for EditorTreeSeq {
+impl TreeMovable for EditorTreeSeqNormal {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         let movement = self
             .children
@@ -98,7 +99,7 @@ impl TreeMovable for EditorTreeTerminal {
     fn enter_from(&mut self, _direction: Direction) {}
 }
 
-impl TreeMovable for EditorTreePower {
+impl TreeMovable for EditorTreePower<EditorTreeSeqNormal> {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         self.power.apply_move(movement)
     }
@@ -108,7 +109,7 @@ impl TreeMovable for EditorTreePower {
     }
 }
 
-impl TreeMovable for EditorTreeFraction {
+impl TreeMovable for EditorTreeFraction<EditorTreeSeqNormal> {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         match self.cursor {
             FractionIndex::Bottom => match self.bottom.apply_move(movement) {
@@ -138,7 +139,7 @@ impl TreeMovable for EditorTreeFraction {
     }
 }
 
-impl<T: SurroundsTreeSeq> TreeMovable for T {
+impl<T: SurroundsTreeSeq<Seq = EditorTreeSeqNormal> + Sealed> TreeMovable for T {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         match self.cursor() {
             SurroundIndex::Left => match movement {
@@ -176,7 +177,7 @@ impl<T: SurroundsTreeSeq> TreeMovable for T {
     }
 }
 
-impl TreeMovable for EditorTreeSumProd {
+impl TreeMovable for EditorTreeSumProd<EditorTreeSeqNormal> {
     fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
         match self.cursor {
             SumProdIndex::BottomExpr => match self.bottom.apply_move(movement) {
@@ -234,7 +235,7 @@ impl TreeMovable for EditorTreeSumProd {
     }
 }
 
-impl TreeMovable for EditorTree {
+impl TreeMovable for EditorTree<EditorTreeSeqNormal> {
     fn enter_from(&mut self, direction: Direction) {
         match &mut self.kind {
             EditorTreeKind::Terminal(term) => term.enter_from(direction),

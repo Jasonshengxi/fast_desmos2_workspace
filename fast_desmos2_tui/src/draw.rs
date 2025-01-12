@@ -3,12 +3,10 @@ use std::io::Write as _;
 
 use glam::UVec2;
 
-use crate::tree::SumProdIndex;
-
-use super::{
+use fast_desmos2_tree::tree::{
     EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreePower,
-    EditorTreeSeq, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SumOrProd,
-    SurroundIndex,
+    EditorTreeSeq, EditorTreeSeqNormal, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal,
+    FractionIndex, SumOrProd, SumProdIndex, SurroundIndex,
 };
 
 trait RectStyle {
@@ -376,15 +374,15 @@ pub trait Debugable {
     fn debug(&self, with_cursor: bool) -> DebugTree;
 }
 
-impl Debugable for EditorTreeSeq {
+impl Debugable for EditorTreeSeqNormal {
     fn debug(&self, with_cursor: bool) -> DebugTree {
-        let is_cursor_last = self.cursor == self.children.len() && with_cursor;
-        let mut nodes = Vec::with_capacity(self.children.len().max(1) + is_cursor_last as usize);
+        let is_cursor_last = self.cursor() == self.children().len() && with_cursor;
+        let mut nodes = Vec::with_capacity(self.children().len().max(1) + is_cursor_last as usize);
 
-        for (index, child) in self.children.iter().enumerate() {
-            nodes.push(child.debug(with_cursor && index == self.cursor));
+        for (index, child) in self.children().iter().enumerate() {
+            nodes.push(child.debug(with_cursor && index == self.cursor()));
         }
-        if self.children.is_empty() {
+        if self.children().is_empty() {
             nodes.push(DebugTree::placeholder());
         }
 
@@ -400,32 +398,32 @@ impl Debugable for EditorTreeSeq {
 impl Debugable for EditorTreeTerminal {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         if with_cursor {
-            DebugTree::char2(['█', self.ch])
+            DebugTree::char2(['█', self.ch()])
         } else {
-            DebugTree::char(self.ch)
+            DebugTree::char(self.ch())
         }
     }
 }
 
-impl Debugable for EditorTreePower {
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreePower<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
-        self.power.debug(with_cursor).boxed(RectStyles::Bold)
+        self.power().debug(with_cursor).boxed(RectStyles::Bold)
     }
 }
 
-impl Debugable for EditorTreeFraction {
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeFraction<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         let top = self
-            .top
-            .debug(with_cursor && self.cursor == FractionIndex::Top);
+            .top()
+            .debug(with_cursor && self.cursor() == FractionIndex::Top);
         let bottom = self
-            .bottom
-            .debug(with_cursor && self.cursor == FractionIndex::Bottom);
+            .bottom()
+            .debug(with_cursor && self.cursor() == FractionIndex::Bottom);
         let bar = DebugTree::horizontal_bar(top.size.x.max(bottom.size.x), RectStyles::Bold);
 
         let tree = DebugTree::vertical(vec![top, bar, bottom]);
 
-        if with_cursor && self.cursor == FractionIndex::Left {
+        if with_cursor && self.cursor() == FractionIndex::Left {
             let cursor = DebugTree::solid(UVec2::new(1, tree.size.y));
             DebugTree::horizontal(vec![cursor, tree])
         } else {
@@ -434,7 +432,7 @@ impl Debugable for EditorTreeFraction {
     }
 }
 
-impl Debugable for EditorTreeParen {
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeParen<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         let tree = self
             .child()
@@ -455,13 +453,13 @@ impl Debugable for EditorTreeParen {
     }
 }
 
-impl Debugable for EditorTreeSqrt {
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeSqrt<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         let tree = self
             .child()
-            .debug(with_cursor && self.cursor == SurroundIndex::Inside)
+            .debug(with_cursor && self.cursor() == SurroundIndex::Inside)
             .sqrt(RectStyles::Normal);
-        if with_cursor && self.cursor == SurroundIndex::Left {
+        if with_cursor && self.cursor() == SurroundIndex::Left {
             DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, tree.size.y)), tree])
         } else {
             tree
@@ -469,19 +467,19 @@ impl Debugable for EditorTreeSqrt {
     }
 }
 
-impl Debugable for EditorTreeSumProd {
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeSumProd<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         let bottom_row = DebugTree::horizontal(vec![
-            self.ident
-                .debug(with_cursor && self.cursor == SumProdIndex::BottomIdent),
+            self.ident()
+                .debug(with_cursor && self.cursor() == SumProdIndex::BottomIdent),
             DebugTree::char('='),
-            self.bottom
-                .debug(with_cursor && self.cursor == SumProdIndex::BottomExpr),
+            self.bottom()
+                .debug(with_cursor && self.cursor() == SumProdIndex::BottomExpr),
         ]);
         let result = DebugTree::vertical(vec![
-            self.top
-                .debug(with_cursor && self.cursor == SumProdIndex::Top),
-            DebugTree::char(match self.sum_or_prod {
+            self.top()
+                .debug(with_cursor && self.cursor() == SumProdIndex::Top),
+            DebugTree::char(match self.sum_or_prod() {
                 SumOrProd::Sum => '∑',
                 SumOrProd::Prod => '∏',
             }),
@@ -497,9 +495,9 @@ impl Debugable for EditorTreeSumProd {
     }
 }
 
-impl Debugable for EditorTree {
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTree<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
-        match &self.kind {
+        match self.kind() {
             EditorTreeKind::Terminal(term) => term.debug(with_cursor),
             EditorTreeKind::Power(power) => power.debug(with_cursor),
             EditorTreeKind::Fraction(fraction) => fraction.debug(with_cursor),

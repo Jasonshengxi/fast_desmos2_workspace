@@ -1,471 +1,360 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::RangeBounds};
 
-use fast_desmos2_tree::tree::{EditorTree, EditorTreeKind, EditorTreeSeq};
-use winnow::{
-    combinator::{
-        alt, delimited, eof, opt, preceded, repeat, separated, separated_pair, terminated,
-    },
-    error::{ContextError, InputError, StrContext, StrContextValue, TreeError},
-    prelude::*,
-    token::any,
-    Stateful,
+use crate::{function_as_parser, parsing::combinator::Whitespace};
+use fast_desmos2_eval::{
+    builtins::Builtins, AddOrSub, CompSet, Conditional, Element, EvalNode, IdentId,
+};
+use fast_desmos2_tree::tree::{
+    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeSeq, EditorTreeTerminal,
+};
+use fast_desmos2_utils::ResExt;
+
+use super::{
+    combinator::{Aggregate, Alt, Chained, Filter, FilterMap, Todo},
+    error::ParseErrorKind,
+    MyParser, ParseError, ParseInput, ParseResult, ResExt as _,
 };
 
-use crate::{
-    builtins::Builtins,
-    tree::{AddOrSub, CompSet, Conditional, EvalNode, IdentId, VarDef},
-};
+pub fn expr_with_whitespace<S: EditorTreeSeq>() -> ExprWithWhitespace<S> {
+    ExprWithWhitespace::new()
+}
 
-use super::{ParseExtra, ParseStream};
+pub fn expr<S: EditorTreeSeq>() -> Expr<S> {
+    Expr::new()
+}
 
-fn derived_input<'a>(from: &ParseInput<'a>, seq: &'a EditorTreeSeq) -> ParseInput<'a> {
-    Stateful {
-        input: ParseStream::new(seq.children()),
-        state: from.state,
+function_as_parser! {
+    pub fn ExprWithWhitespace<S>(input) -> <EvalNode> {
+        add_sub().surround_whitespace().parse_next(input)
+    }
+
+    pub fn Expr<S>(input) -> <EvalNode> {
+        add_sub().parse_next(input)
     }
 }
 
-pub type ParseInput<'a> = Stateful<ParseStream<'a>, ParseExtra<'a>>;
-pub type ParseResult<'a, T> = PResult<T, ParseError<'a>>;
-// pub type ParseError<'a> = TreeError<ParseInput<'a>>;
-pub type ParseError<'a> = TreeError<ParseInput<'a>>;
-// pub type ParseError<'a> = ContextError;
-
-pub fn parse_var_def<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, VarDef> {
-    (parse_raw_ident, parse_char('='), parse_whole_seq)
-        .map(|(ident, _, expr)| VarDef::new(ident, expr))
-        .parse_next(input)
-}
-
-pub fn parse_whole_seq<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    terminated(parse_seq, eof).parse_next(input)
-}
-
-pub fn parse_seq<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    surround_whitespace(parse_add_sub).parse_next(input)
-}
-
-fn expect_description(x: &'static str) -> StrContext {
-    StrContext::Expected(StrContextValue::Description(x))
-}
-
-fn parse_add_sub<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    fn parse_one_add_or_sub<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, AddOrSub> {
-        surround_whitespace(
-            alt((
-                parse_char('+').map(|_| AddOrSub::Add),
-                parse_char('-').map(|_| AddOrSub::Sub),
-            ))
-            .context(expect_description("plus or minus sign")),
+pub fn add_sub<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    (
+        terminal_eq('-')
+            .ignore_after(Whitespace::new())
+            .opt()
+            .map(|x| match x {
+                Some(_) => AddOrSub::Sub,
+                _ => AddOrSub::Add,
+            }),
+        multiply(),
+    )
+        .map(|x| vec![x])
+        .then_fold_repeated(
+            ..,
+            (
+                Alt::new((
+                    terminal_eq('+').map(|_| AddOrSub::Add),
+                    terminal_eq('-').map(|_| AddOrSub::Sub),
+                ))
+                .surround_whitespace(),
+                multiply(),
+            ),
+            Vec::fold,
         )
-        .parse_next(input)
-    }
-
-    (
-        opt(parse_one_add_or_sub),
-        parse_multiply,
-        repeat(.., (parse_one_add_or_sub, parse_multiply)),
-    )
-        .map(|(first_sign, first, mut pairs): (_, _, Vec<_>)| {
-            let first_sign = first_sign.unwrap_or(AddOrSub::Add);
-            if pairs.is_empty() && first_sign == AddOrSub::Add {
-                first
-            } else {
-                pairs.insert(0, (first_sign, first));
-                EvalNode::add_sub(pairs)
-            }
-        })
-        .parse_next(input)
+        .map(EvalNode::add_sub)
 }
 
-fn parse_multiply<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    (
-        parse_postfix,
-        repeat(.., preceded(parse_whitespace, parse_postfix)),
-    )
-        .map(|(first, remaining): (_, Vec<_>)| {
-            if remaining.is_empty() {
-                first
-            } else {
-                let mut nodes = remaining;
-                nodes.insert(0, first);
-                EvalNode::multiply(nodes)
-            }
-        })
-        .parse_next(input)
+pub fn multiply<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    postfix()
+        .map(|x| vec![x])
+        .then_fold_repeated(
+            ..,
+            (Whitespace::new(), terminal_eq('*').whitespace_after().opt()).preceding(postfix()),
+            Vec::fold,
+        )
+        .map(EvalNode::multiply)
 }
 
-fn parse_postfix<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+pub fn postfix<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
     enum Postfix {
-        Ind(EvalNode),
+        Index(EvalNode),
         Power(EvalNode),
+        Element(Element),
     }
 
-    fn parse_single_postfix<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Postfix> {
-        alt((
-            alt((
-                parse_brackets_chained(parse_seq),
-                parse_brackets_chained(parse_list_literal_inner),
-                parse_brackets_chained(parse_list_range_inner),
-            ))
-            .map(Postfix::Ind),
-            parse_power_chained(parse_seq).map(Postfix::Power),
-        ))
-        .parse_next(input)
-    }
-
-    let mut output = parse_everything_else(input)?;
-    while let Ok(postfix) = parse_single_postfix(input) {
-        output = match postfix {
-            Postfix::Ind(index) => EvalNode::index(output, index),
-            Postfix::Power(power) => EvalNode::power(output, power),
-        }
-    }
-
-    Ok(output)
+    everything_else().then_fold_repeated(
+        ..,
+        Whitespace::new().preceding(Alt::new((
+            brackets_chained(Alt::new((
+                expr().then_eof("expr"),
+                list_contents_then_eof(),
+            )))
+            .map(Postfix::Index),
+            power_chained(Expr::new()).map(Postfix::Power),
+            (
+                terminal_eq('.'),
+                Alt::new((
+                    terminal_eq('x').map(|_| Element::X),
+                    terminal_eq('y').map(|_| Element::Y),
+                )),
+            )
+                .map(|x| Postfix::Element(x.1)),
+        ))),
+        |node, postfix| match postfix {
+            Postfix::Index(index) => EvalNode::index(node, index),
+            Postfix::Power(power) => EvalNode::power(node, power),
+            Postfix::Element(element) => EvalNode::element(node, element),
+        },
+    )
 }
 
-fn parse_everything_else<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    alt((
-        parse_number,
-        parse_function_call,
-        parse_identifier,
-        parse_point_literal,
-        parse_parens,
-        parse_sqrt,
-        parse_abs,
-        parse_if_else,
-        parse_sum_prod,
-        parse_fraction,
-        parse_brackets_chained(parse_list_range_inner),
-        parse_brackets_chained(parse_list_literal_inner),
+pub fn everything_else<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    Alt::new((
+        function_call(),
+        ident(),
+        number(),
+        SumProd::new(),
+        Fraction::new(),
+        abs_chained(expr()).map(EvalNode::abs),
+        parens_chained(Alt::new((
+            (expr(), terminal_eq(','), expr()).map(|(x, _, y)| EvalNode::point((x, y))),
+            expr(),
+        ))),
+        sqrt_chained(expr()).map(EvalNode::sqrt),
+        brackets_chained(list_contents_then_eof()),
     ))
-    .parse_next(input)
 }
 
-fn parse_char<'a>(ch: char) -> impl Parser<ParseInput<'a>, (), ParseError<'a>> {
-    any.verify(move |tree: &EditorTree| tree.is_terminal_and_eq(ch))
-        .context(StrContext::Expected(StrContextValue::CharLiteral(ch)))
-        .void()
+pub fn terminal_and_then<S: EditorTreeSeq, O>(
+    and: impl Fn(char) -> Option<O>,
+) -> impl MyParser<S, Output = O> {
+    FilterMap::new(move |token| match token.kind() {
+        EditorTreeKind::Terminal(term) => and(term.ch()),
+        _ => None,
+    })
 }
 
-fn parse_whitespace<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, ()> {
-    repeat::<_, _, (), _, _>(.., parse_char(' '))
-        .void()
-        .parse_next(input)
+pub fn terminal_and<S: EditorTreeSeq>(
+    and: impl Fn(char) -> bool,
+) -> impl MyParser<S, Output = char> {
+    FilterMap::new(move |token| match token.kind() {
+        EditorTreeKind::Terminal(term) => and(term.ch()).then_some(term.ch()),
+        _ => None,
+    })
 }
 
-fn surround_whitespace<'a, T>(
-    inner: impl Parser<ParseInput<'a>, T, ParseError<'a>>,
-) -> impl Parser<ParseInput<'a>, T, ParseError<'a>> {
-    delimited(parse_whitespace, inner, parse_whitespace)
+pub fn terminal_eq<S: EditorTreeSeq>(ch: char) -> impl MyParser<S, Output = ()> {
+    Filter::new(move |token| match token.kind() {
+        EditorTreeKind::Terminal(term) => term.ch() == ch,
+        _ => false,
+    })
 }
 
-fn parse_map_char<'a, T>(
-    mut map: impl FnMut(char) -> Option<T> + 'static,
-) -> impl Parser<ParseInput<'a>, T, ParseError<'a>> {
-    any.verify_map(move |tree: &EditorTree| tree.is_terminal_and_then(|term| map(term.ch())))
+pub fn raw_raw_ident<S: EditorTreeSeq>() -> impl MyParser<S, Output = String> {
+    terminal_and(|ch| ch.is_ascii_alphabetic()).repeat_collected(1..)
 }
 
-fn parse_fraction<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    let fraction = any
-        .verify_map(|tree: &EditorTree| match tree.kind() {
-            EditorTreeKind::Fraction(fraction) => Some(fraction),
-            _ => None,
+pub fn raw_ident<S: EditorTreeSeq>() -> impl MyParser<S, Output = IdentId> {
+    raw_raw_ident().map_with_extra(|ident, extra| extra.idents.convert_id(&ident))
+}
+
+pub fn function_call<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    (
+        raw_raw_ident().whitespace_after(),
+        power_chained(expr()).whitespace_after().opt(),
+        parens_chained(comma_separated_exprs()),
+    )
+        .map_with_extra(|(ident, power, params), extra| {
+            match Builtins::from_str(ident.as_bytes()) {
+                Some(builtins) => EvalNode::builtins_call(builtins, power, params),
+                None => EvalNode::function_call(extra.idents.convert_id(&ident), power, params),
+            }
         })
-        .context(expect_description("a fraction"))
-        .parse_next(input)?;
+}
 
-    let top = parse_whole_seq(&mut derived_input(input, fraction.top()))?;
-    let bottom = parse_whole_seq(&mut derived_input(input, fraction.bottom()))?;
+pub fn ident<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    raw_ident().map(EvalNode::ident)
+}
+
+pub fn num_string<S: EditorTreeSeq>() -> impl MyParser<S, Output = String> {
+    terminal_and(|ch| ch.is_ascii_digit()).repeat_collected(1..)
+}
+
+pub fn raw_number<S: EditorTreeSeq>() -> impl MyParser<S, Output = f64> {
+    Alt::new((
+        (
+            num_string().map(Some),
+            (terminal_eq('.'), num_string()).map(|x| x.1).opt(),
+        ),
+        (terminal_eq('.'), num_string())
+            .map(|x| x.1)
+            .map(Some)
+            .map(|frac| (None, frac)),
+    ))
+    .map(|(int, frac)| {
+        let mut joined = int.unwrap_or_else(String::new);
+        if let Some(frac) = frac {
+            joined.push('.');
+            joined.extend(frac.chars());
+        }
+        joined.parse().unwrap_unreach()
+    })
+}
+
+pub fn number<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    raw_number().map(EvalNode::number)
+}
+
+// fn parse_if_else<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+//     fn parse_conditionals<S: EditorTreeSeq>() -> impl MyParser<> {
+//         separated(1.., parse_conditional, parse_char(','))
+//     }
+//
+//     fn parse_if_else_content<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+//         (
+//             parse_conditionals,
+//             opt((
+//                 preceded(parse_char(':'), parse_seq),
+//                 opt(preceded(
+//                     parse_char(','),
+//                     alt((parse_seq, parse_if_else_content)),
+//                 )),
+//             )),
+//         )
+//             .map(|(conds, options)| {
+//                 let (yes, no) = match options {
+//                     Some((yes, no)) => (Some(yes), no),
+//                     None => (None, None),
+//                 };
+//                 EvalNode::if_else(conds, yes, no)
+//             })
+//             .parse_next(input)
+//     }
+//
+//     parse_curly_chained(parse_if_else_content).parse_next(input)
+// }
+
+fn parse_conditional<S: EditorTreeSeq>() -> impl MyParser<S, Output = Conditional> {
+    (
+        expr().whitespace_after(),
+        (
+            Alt::new((
+                terminal_eq('=').map(|_| CompSet::EQUAL),
+                (
+                    Alt::new((
+                        terminal_eq('<').map(|_| CompSet::LESS),
+                        terminal_eq('>').map(|_| CompSet::MORE),
+                    )),
+                    terminal_eq('=').opt(),
+                )
+                    .map(|(normal, equal)| match equal {
+                        Some(_) => normal.union(CompSet::EQUAL),
+                        None => normal,
+                    }),
+            )),
+            expr(),
+        )
+            .repeat_collected(1..),
+    )
+        .map(|(first, remaining): (_, Vec<_>)| Conditional::new(first, remaining))
+}
+
+pub fn fraction<'a, S: EditorTreeSeq>(input: &mut ParseInput<'a, S>) -> ParseResult<'a, EvalNode> {
+    let next_token = input.peek().ok_or(input.err_eof())?;
+    let EditorTreeKind::Fraction(fraction) = next_token.kind() else {
+        return Err(input.err_expected("a fraction"));
+    };
+    input.advance();
+
+    let [top, bottom] = [fraction.top(), fraction.bottom()].map(|x| input.derived(x.children()));
+
+    let top = Expr::new().parse_whole("fraction top expr", top).fatal()?;
+    let bottom = Expr::new()
+        .parse_whole("fraction bottom expr", bottom)
+        .fatal()?;
 
     Ok(EvalNode::fraction(top, bottom))
 }
 
-fn parse_sum_prod<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    let sum_prod = any
-        .verify_map(|tree: &EditorTree| match tree.kind() {
-            EditorTreeKind::SumProd(sum_prod) => Some(sum_prod),
-            _ => None,
-        })
-        .context(expect_description("a sum/prod node"))
-        .parse_next(input)?;
+pub fn sum_prod<'a, S: EditorTreeSeq>(input: &mut ParseInput<'a, S>) -> ParseResult<'a, EvalNode> {
+    let next_token = input.peek().ok_or(input.err_eof())?;
+    let EditorTreeKind::SumProd(sum_prod) = next_token.kind() else {
+        return Err(input.err_expected("a sum or product"));
+    };
+    input.advance();
 
-    let top = parse_whole_seq(&mut derived_input(input, sum_prod.top()))?;
-    let bottom = parse_whole_seq(&mut derived_input(input, sum_prod.bottom()))?;
+    let kind = sum_prod.sum_or_prod();
+    let expr = multiply().fatal().parse_next(input)?;
 
-    let ident =
-        terminated(parse_raw_ident, eof).parse_next(&mut derived_input(input, sum_prod.ident()))?;
+    let [top, bottom, ident] =
+        [sum_prod.top(), sum_prod.bottom(), sum_prod.ident()].map(|x| input.derived(x.children()));
 
-    let expr = parse_multiply(input)?;
+    let top = Expr::new().parse_whole("sum prod top expr", top).fatal()?;
+    let bottom = Expr::new()
+        .parse_whole("sum prod bottom expr", bottom)
+        .fatal()?;
+    let ident = raw_ident().parse_whole("sum prod ident", ident).fatal()?;
 
-    Ok(EvalNode::sum_prod(
-        sum_prod.sum_or_prod(),
-        ident,
-        bottom,
-        top,
-        expr,
+    Ok(EvalNode::sum_prod(kind, ident, bottom, top, expr))
+}
+
+pub fn list_contents_then_eof<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    Alt::new((
+        list_range().surround_whitespace().then_eof("list range"),
+        list_literal()
+            .surround_whitespace()
+            .then_eof("list literal"),
     ))
 }
 
-fn parse_if_else<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    fn parse_conditionals<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Vec<Conditional>> {
-        separated(1.., parse_conditional, parse_char(',')).parse_next(input)
-    }
-
-    fn parse_if_else_content<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-        (
-            parse_conditionals,
-            opt((
-                preceded(parse_char(':'), parse_seq),
-                opt(preceded(
-                    parse_char(','),
-                    alt((parse_seq, parse_if_else_content)),
-                )),
-            )),
-        )
-            .map(|(conds, options)| {
-                let (yes, no) = match options {
-                    Some((yes, no)) => (Some(yes), no),
-                    None => (None, None),
-                };
-                EvalNode::if_else(conds, yes, no)
-            })
-            .parse_next(input)
-    }
-
-    parse_curly_chained(parse_if_else_content).parse_next(input)
+pub fn comma_separated_exprs<S: EditorTreeSeq>() -> impl MyParser<S, Output = Vec<EvalNode>> {
+    expr().separated(
+        terminal_eq(',').surround_whitespace(),
+        ..,
+        Vec::new,
+        Vec::fold,
+    )
 }
 
-fn parse_conditional<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Conditional> {
-    (
-        parse_seq,
-        alt((repeat(
-            1..,
-            (
-                alt((
-                    parse_char('=').map(|_| CompSet::EQUAL),
-                    (
-                        alt((
-                            parse_char('<').map(|_| CompSet::LESS),
-                            parse_char('>').map(|_| CompSet::MORE),
-                        )),
-                        opt(parse_char('=')),
-                    )
-                        .map(|(normal, equal)| match equal {
-                            Some(_) => normal.union(CompSet::EQUAL),
-                            None => normal,
-                        }),
-                ))
-                .context(expect_description("a symbol for comparison")),
-                parse_seq,
-            ),
-        ),)),
-    )
-        .context(expect_description("a conditional"))
-        .map(|(first, remaining): (_, Vec<_>)| Conditional::new(first, remaining))
-        .parse_next(input)
+pub fn list_literal<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
+    comma_separated_exprs().map(EvalNode::list_literal)
 }
 
-fn parse_list_range_inner<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
+pub fn ellipsis<S: EditorTreeSeq>() -> impl MyParser<S, Output = ()> {
+    (terminal_eq('.'), terminal_eq('.'), terminal_eq('.')).map(|_| ())
+}
+
+pub fn list_range<S: EditorTreeSeq>() -> impl MyParser<S, Output = EvalNode> {
     (
-        parse_seq,
-        opt(preceded(parse_char(','), parse_seq)),
-        opt(parse_char(',')),
-        parse_ellipsis,
-        opt(parse_char(',')),
-        parse_seq,
+        expr().whitespace_after(),
+        terminal_eq(',').preceding(expr()).whitespace_after().opt(),
+        terminal_eq(',').whitespace_after().opt(),
+        ellipsis().ignore_after(Whitespace::new()),
+        terminal_eq(',').whitespace_after().opt(),
+        expr(),
     )
-        .context(expect_description("a list range"))
         .map(|(from, next, _, _, _, to)| EvalNode::list_range(from, next, to))
-        .parse_next(input)
 }
 
-fn parse_ellipsis<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, ()> {
-    surround_whitespace((parse_char('.'), parse_char('.'), parse_char('.')))
-        .void()
-        .context(expect_description("an ellipsis"))
-        .parse_next(input)
+function_as_parser! {
+    pub fn Fraction<S>(input) -> <EvalNode> { fraction(input) }
+    pub fn SumProd<S>(input) -> <EvalNode> { sum_prod(input) }
 }
 
-fn parse_number<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    fn unsigned_integer<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Vec<u8>> {
-        repeat(
-            1..,
-            parse_map_char(|ch| ch.to_digit(10).map(|x| x as u8 + b'0')),
-        )
-        .parse_next(input)
-    }
-
-    fn fractional_part<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, Vec<u8>> {
-        preceded(parse_char('.'), unsigned_integer).parse_next(input)
-    }
-
-    surround_whitespace(alt((
-        (unsigned_integer, opt(fractional_part)),
-        fractional_part.map(|fract| (Vec::new(), Some(fract))),
-    )))
-    .map(|(int_part, frac_part)| {
-        // TODO fix the amount of allocation here
-        let int_part = String::from_utf8(int_part).unwrap();
-        let frac_part = frac_part.map(|x| String::from_utf8(x).unwrap());
-        let combined = match frac_part {
-            Some(frac_part) => format!("{int_part}.{frac_part}"),
-            None => int_part,
-        };
-        EvalNode::number(combined.parse().unwrap())
-    })
-    .context(expect_description("a number"))
-    .parse_next(input)
-}
-
-fn parse_function_call<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    (
-        parse_raw_raw_ident,
-        opt(parse_power_chained(parse_seq)),
-        parse_parens_chained(separated(.., parse_seq, parse_char(',')))
-            .context(expect_description("function parameters")),
-    )
-        .map(
-            |(ident, power, params): (_, _, Vec<_>)| match Builtins::from_str(ident.as_bytes()) {
-                Some(builtins) => EvalNode::builtins_call(builtins, power, params),
-                None => {
-                    let ident = input.state.idents.convert_id(&ident);
-                    EvalNode::function_call(ident, power, params)
-                }
-            },
-        )
-        .context(expect_description("a function call"))
-        .parse_next(input)
-}
-
-fn parse_raw_raw_ident<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, String> {
-    surround_whitespace(repeat(
-        1..,
-        parse_map_char(|ch| ch.is_ascii_alphabetic().then_some(ch)),
-    ))
-    .context(expect_description("an identifier"))
-    .parse_next(input)
-}
-
-fn parse_raw_ident<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, IdentId> {
-    parse_raw_raw_ident
-        .map(|ident_str| input.state.idents.convert_id(&ident_str))
-        .parse_next(input)
-}
-
-fn parse_identifier<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_raw_ident.map(EvalNode::ident).parse_next(input)
-}
-
-struct ChainParser<'a, M, P, O>
-where
-    M: FnMut(&EditorTreeKind) -> Option<&EditorTreeSeq>,
-    P: Parser<ParseInput<'a>, O, ParseError<'a>>,
-{
-    matcher: M,
-    inner: P,
-    _phantom: PhantomData<(ParseInput<'a>, O, ParseError<'a>)>,
-}
-
-impl<'a, M, P, O> Parser<ParseInput<'a>, O, ParseError<'a>> for ChainParser<'a, M, P, O>
-where
-    M: FnMut(&EditorTreeKind) -> Option<&EditorTreeSeq>,
-    P: Parser<ParseInput<'a>, O, ParseError<'a>>,
-{
-    fn parse_next(&mut self, input: &mut ParseInput<'a>) -> PResult<O, ParseError<'a>> {
-        let stage = any
-            .verify_map(|tree: &EditorTree| (self.matcher)(tree.kind()))
-            .parse_next(input)?;
-        let mut stream = derived_input(input, stage);
-        (self.inner).parse_next(&mut stream)
-    }
-}
-
-fn parse_chained<'a, O>(
-    matcher: impl FnMut(&EditorTreeKind) -> Option<&EditorTreeSeq>,
-    inner: impl Parser<ParseInput<'a>, O, ParseError<'a>>,
-) -> impl Parser<ParseInput<'a>, O, ParseError<'a>> {
-    ChainParser {
-        matcher,
-        inner: terminated(inner, eof),
-        _phantom: PhantomData,
-    }
-}
-
-macro_rules! parser_chain {
-    ($(fn $name: ident() {
-        $p:pat => $e:expr $(,)?
-    })*) => {
-        $(fn $name<'a, O>(
-            inner: impl Parser<ParseInput<'a>, O, ParseError<'a>>,
-        ) -> impl Parser<ParseInput<'a>, O, ParseError<'a>> {
-            parse_chained(
-                |kind| match kind {
-                    $p => $e,
-                    _ => None,
-                },
-                inner,
+macro_rules! chained_parsers {
+    ($($name:ident $msg:literal : $etk:ident :: $variant:ident ($x:ident) => $ex:expr,)*) =>{
+        $(#[allow(unused)] fn $name<S: EditorTreeSeq, P: MyParser<S>>(parser: P) -> impl MyParser<S, Output = P::Output> {
+            Chained::new(|node|
+                Some(match node.kind() {
+                    $etk::$variant($x) => $ex,
+                    _ => return None,
+                }),
+                parser.then_eof($msg).fatal()
             )
         })*
     };
 }
-parser_chain! {
-    fn parse_parens_chained() {
-        EditorTreeKind::Paren(paren) => Some(paren.child())
-    }
 
-    fn parse_power_chained() {
-        EditorTreeKind::Power(power) => Some(power.power())
-    }
-
-    fn parse_abs_chained() {
-        EditorTreeKind::Abs(abs) => Some(abs.child())
-    }
-
-    fn parse_sqrt_chained() {
-        EditorTreeKind::Sqrt(sqrt) => Some(sqrt.child())
-    }
-
-    fn parse_brackets_chained() {
-        EditorTreeKind::Bracket(bracket) => Some(bracket.child())
-    }
-
-    fn parse_curly_chained() {
-        EditorTreeKind::Curly(curly) => Some(curly.child())
-    }
-}
-
-fn parse_parens<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_parens_chained(parse_seq)
-        .context(expect_description("a set of parens"))
-        .parse_next(input)
-}
-
-fn parse_point_literal<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_parens_chained(separated_pair(parse_seq, parse_char(','), parse_seq))
-        .map(EvalNode::point)
-        .context(expect_description("a point literal"))
-        .parse_next(input)
-}
-
-fn parse_abs<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_abs_chained(parse_seq)
-        .map(EvalNode::abs)
-        .context(expect_description("an absolute value"))
-        .parse_next(input)
-}
-
-fn parse_sqrt<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    parse_sqrt_chained(parse_seq)
-        .map(EvalNode::sqrt)
-        .context(expect_description("a square root"))
-        .parse_next(input)
-}
-
-fn parse_list_literal_inner<'a>(input: &mut ParseInput<'a>) -> ParseResult<'a, EvalNode> {
-    separated(.., parse_seq, parse_char(','))
-        .map(EvalNode::list_literal)
-        .context(expect_description("a list literal"))
-        .parse_next(input)
+chained_parsers! {
+    parens_chained "parens expr": EditorTreeKind::Paren(parens) => parens.child(),
+    brackets_chained "brackets expr": EditorTreeKind::Bracket(brackets) => brackets.child(),
+    power_chained "power expr": EditorTreeKind::Power(power) => power.power(),
+    abs_chained "abs expr": EditorTreeKind::Abs(abs) => abs.child(),
+    sqrt_chained "sqrt expr": EditorTreeKind::Sqrt(sqrt) => sqrt.child(),
 }

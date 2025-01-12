@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::ops::{Deref, DerefMut};
 
 use apps::text::{GlyphInstance, GpuGlyphDataBindings, TextApp};
@@ -13,7 +15,7 @@ use fast_desmos2_gl::{
     info::GlString,
     GlError,
 };
-use fast_desmos2_tree::tree::{EditorTree, EditorTreeSeq, TreeAction};
+use fast_desmos2_tree::tree::{EditorTree, EditorTreeSeq, EditorTreeSeqNormal, TreeAction};
 use fast_desmos2_utils as utils;
 use glam::{IVec2, Vec4};
 use input::{KeyExt as _, WindowWithInput};
@@ -66,7 +68,7 @@ struct App {
     window_size: IVec2,
 
     cpu_glyph_data: CpuGlyphData,
-    editor: Mutated<EditorTreeSeq>,
+    editor: Mutated<EditorTreeSeqNormal>,
 
     debug_boxes: [TextApp<'static>; DEBUG_LAYERS],
     text_app: TextApp<'static>,
@@ -95,7 +97,7 @@ impl App {
             window,
             window_size: IVec2::ONE,
             cpu_glyph_data,
-            editor: Mutated::new(EditorTreeSeq::empty()),
+            editor: Mutated::new(EditorTreeSeqNormal::empty()),
             text_app: TextApp::new(glyph_bindings),
             debug_boxes: [(); DEBUG_LAYERS].map(|_| TextApp::new(glyph_bindings)),
         }

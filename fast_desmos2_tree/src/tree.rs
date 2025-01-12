@@ -2,26 +2,89 @@ pub use actions::{ActionOutcome, TreeAction};
 pub use movement::{Direction, Motion, TreeMovable};
 use std::fmt::Debug;
 
+use crate::Sealed;
+
 mod actions;
-pub mod debug;
 mod movement;
 
-#[derive(Clone, PartialEq)]
-pub struct EditorTreeSeq {
-    cursor: usize,
-    children: Vec<EditorTree>,
+
+pub trait EditorTreeSeq: Debug + Clone + PartialEq + Sized {
+    fn children(&self) -> &[EditorTree<Self>];
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
+    fn cursor(&self) -> usize;
+    fn active_child(&self) -> Option<&EditorTree<Self>>;
+    fn active_child_mut(&mut self) -> Option<&mut EditorTree<Self>>;
+    fn extend(&mut self, other: Self);
 }
 
-impl Debug for EditorTreeSeq {
+#[derive(Clone, PartialEq)]
+pub struct EditorTreeSeqVisual {
+    start_cursor: usize,
+    now_cursor: usize,
+    children: Vec<EditorTree<Self>>,
+}
+
+impl Debug for EditorTreeSeqVisual {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        DebugWrapper(self).fmt(f)
+    }
+}
+
+impl EditorTreeSeq for EditorTreeSeqVisual {
+    fn children(&self) -> &[EditorTree<Self>] {
+        &self.children
+    }
+
+    fn len(&self) -> usize {
+        self.children.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    fn cursor(&self) -> usize {
+        self.now_cursor
+    }
+
+    fn active_child(&self) -> Option<&EditorTree<Self>> {
+        self.children.get(self.cursor())
+    }
+
+    fn active_child_mut(&mut self) -> Option<&mut EditorTree<Self>> {
+        self.children.get_mut(self.now_cursor)
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.children.extend(other.children);
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct EditorTreeSeqNormal {
+    cursor: usize,
+    children: Vec<EditorTree<EditorTreeSeqNormal>>,
+}
+
+impl Debug for EditorTreeSeqNormal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        DebugWrapper(self).fmt(f)
+    }
+}
+
+struct DebugWrapper<'a, T>(&'a T);
+impl<'a, T: EditorTreeSeq> Debug for DebugWrapper<'a, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let all_str = self
+            .0
             .children()
             .iter()
             .all(|child| matches!(child.kind(), EditorTreeKind::Terminal(_)));
         if all_str {
-            let mut string = String::with_capacity(self.children().len());
+            let mut string = String::with_capacity(self.0.children().len());
 
-            for child in self.children().iter() {
+            for child in self.0.children().iter() {
                 let EditorTreeKind::Terminal(term) = child.kind() else {
                     unreachable!()
                 };
@@ -33,26 +96,26 @@ impl Debug for EditorTreeSeq {
                 .finish()
         } else {
             f.debug_struct("EditorTreeSeq")
-                .field("cursor", &self.cursor)
-                .field("children", &self.children)
+                .field("cursor", &self.0.cursor())
+                .field("children", &self.0.children())
                 .finish()
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTree {
-    kind: EditorTreeKind,
+pub struct EditorTree<S: EditorTreeSeq> {
+    kind: EditorTreeKind<S>,
 }
 
-impl From<EditorTree> for EditorTreeSeq {
-    fn from(value: EditorTree) -> Self {
-        EditorTreeSeq::one(value)
+impl From<EditorTree<EditorTreeSeqNormal>> for EditorTreeSeqNormal {
+    fn from(value: EditorTree<EditorTreeSeqNormal>) -> Self {
+        EditorTreeSeqNormal::one(value)
     }
 }
 
-impl EditorTreeSeq {
-    pub fn new(cursor: usize, children: Vec<EditorTree>) -> Self {
+impl EditorTreeSeqNormal {
+    pub fn new(cursor: usize, children: Vec<EditorTree<EditorTreeSeqNormal>>) -> Self {
         assert!(cursor <= children.len());
         Self { cursor, children }
     }
@@ -68,43 +131,15 @@ impl EditorTreeSeq {
         Self::new(0, Vec::new())
     }
 
-    pub fn one(child: EditorTree) -> Self {
+    pub fn one(child: EditorTree<EditorTreeSeqNormal>) -> Self {
         Self::new(0, vec![child])
     }
 
-    pub fn first(children: Vec<EditorTree>) -> Self {
+    pub fn first(children: Vec<EditorTree<EditorTreeSeqNormal>>) -> Self {
         Self::new(0, children)
     }
 
-    pub fn children(&self) -> &[EditorTree] {
-        &self.children
-    }
-
-    pub fn len(&self) -> usize {
-        self.children.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.children.is_empty()
-    }
-
-    pub fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    pub fn active_child(&self) -> Option<&EditorTree> {
-        self.children.get(self.cursor)
-    }
-
-    pub fn active_child_mut(&mut self) -> Option<&mut EditorTree> {
-        self.children.get_mut(self.cursor)
-    }
-
-    pub fn extend(&mut self, other: Self) {
-        self.children.extend(other.children);
-    }
-
-    pub fn move_to(&mut self, to: usize, from: Direction) {
+    fn move_to(&mut self, to: usize, from: Direction) {
         assert!(to <= self.children.len());
         self.cursor = to;
         if let Some(child) = self.active_child_mut() {
@@ -112,17 +147,47 @@ impl EditorTreeSeq {
         }
     }
 
-    pub fn move_right(&mut self, by: usize) {
+    fn move_right(&mut self, by: usize) {
         self.move_to(self.cursor + by, Direction::Left);
     }
 
-    pub fn move_left(&mut self, by: usize) {
+    fn move_left(&mut self, by: usize) {
         self.move_to(self.cursor - by, Direction::Right);
     }
 }
 
-impl EditorTree {
-    pub fn new(kind: EditorTreeKind) -> Self {
+impl EditorTreeSeq for EditorTreeSeqNormal {
+    fn children(&self) -> &[EditorTree<EditorTreeSeqNormal>] {
+        &self.children
+    }
+
+    fn len(&self) -> usize {
+        self.children.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    fn active_child(&self) -> Option<&EditorTree<EditorTreeSeqNormal>> {
+        self.children.get(self.cursor)
+    }
+
+    fn active_child_mut(&mut self) -> Option<&mut EditorTree<EditorTreeSeqNormal>> {
+        self.children.get_mut(self.cursor)
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.children.extend(other.children);
+    }
+}
+
+impl<S: EditorTreeSeq> EditorTree<S> {
+    pub fn new(kind: EditorTreeKind<S>) -> Self {
         Self { kind }
     }
 
@@ -130,62 +195,57 @@ impl EditorTree {
         Self::new(EditorTreeKind::Terminal(EditorTreeTerminal::new(ch)))
     }
 
-    pub fn sqrt(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn sqrt(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Sqrt(EditorTreeSqrt { cursor, child }))
     }
 
-    pub fn complete_paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn complete_paren(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Paren(EditorTreeParen::complete(
             cursor, child,
         )))
     }
 
-    pub fn incomplete_paren(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn incomplete_paren(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Paren(EditorTreeParen::incomplete(
             cursor, child,
         )))
     }
 
-    pub fn complete_abs(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn complete_abs(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Abs(EditorTreeAbs::complete(cursor, child)))
     }
 
-    pub fn incomplete_abs(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn incomplete_abs(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Abs(EditorTreeAbs::incomplete(
             cursor, child,
         )))
     }
 
-    pub fn complete_curly(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn complete_curly(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Curly(EditorTreeCurly::complete(
             cursor, child,
         )))
     }
 
-    pub fn incomplete_curly(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn incomplete_curly(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Curly(EditorTreeCurly::incomplete(
             cursor, child,
         )))
     }
 
-    pub fn complete_brackets(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn complete_brackets(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Bracket(EditorTreeBracket::complete(
             cursor, child,
         )))
     }
 
-    pub fn incomplete_brackets(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+    pub fn incomplete_brackets(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Bracket(EditorTreeBracket::incomplete(
             cursor, child,
         )))
     }
 
-    pub fn sum(
-        cursor: SumProdIndex,
-        top: EditorTreeSeq,
-        bottom: EditorTreeSeq,
-        ident: EditorTreeSeq,
-    ) -> Self {
+    pub fn sum(cursor: SumProdIndex, top: S, bottom: S, ident: S) -> Self {
         Self::new(EditorTreeKind::SumProd(EditorTreeSumProd::new(
             SumOrProd::Sum,
             cursor,
@@ -195,12 +255,7 @@ impl EditorTree {
         )))
     }
 
-    pub fn prod(
-        cursor: SumProdIndex,
-        top: EditorTreeSeq,
-        bottom: EditorTreeSeq,
-        ident: EditorTreeSeq,
-    ) -> Self {
+    pub fn prod(cursor: SumProdIndex, top: S, bottom: S, ident: S) -> Self {
         Self::new(EditorTreeKind::SumProd(EditorTreeSumProd::new(
             SumOrProd::Prod,
             cursor,
@@ -210,21 +265,21 @@ impl EditorTree {
         )))
     }
 
-    pub fn power(power: EditorTreeSeq) -> Self {
+    pub fn power(power: S) -> Self {
         Self::new(EditorTreeKind::Power(EditorTreePower::new(power)))
     }
 
-    pub fn fraction(cursor: FractionIndex, top: EditorTreeSeq, bottom: EditorTreeSeq) -> Self {
+    pub fn fraction(cursor: FractionIndex, top: S, bottom: S) -> Self {
         Self::new(EditorTreeKind::Fraction(EditorTreeFraction::new(
             cursor, top, bottom,
         )))
     }
 
-    pub fn kind(&self) -> &EditorTreeKind {
+    pub fn kind(&self) -> &EditorTreeKind<S> {
         &self.kind
     }
 
-    pub fn into_take(self) -> EditorTreeKind {
+    pub fn into_take(self) -> EditorTreeKind<S> {
         self.kind
     }
 
@@ -242,7 +297,7 @@ impl EditorTree {
         }
     }
 
-    pub fn active_child(&self) -> Option<&EditorTreeSeq> {
+    pub fn active_child(&self) -> Option<&S> {
         match &self.kind {
             EditorTreeKind::Terminal(_) => None,
             EditorTreeKind::Fraction(fraction) => fraction.active_child(),
@@ -286,16 +341,16 @@ impl EditorTree {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum EditorTreeKind {
+pub enum EditorTreeKind<S: EditorTreeSeq> {
     Terminal(EditorTreeTerminal),
-    Fraction(EditorTreeFraction),
-    Power(EditorTreePower),
-    Sqrt(EditorTreeSqrt),
-    Paren(EditorTreeParen),
-    SumProd(EditorTreeSumProd),
-    Abs(EditorTreeAbs),
-    Bracket(EditorTreeBracket),
-    Curly(EditorTreeCurly),
+    Fraction(EditorTreeFraction<S>),
+    Power(EditorTreePower<S>),
+    Sqrt(EditorTreeSqrt<S>),
+    Paren(EditorTreeParen<S>),
+    SumProd(EditorTreeSumProd<S>),
+    Abs(EditorTreeAbs<S>),
+    Bracket(EditorTreeBracket<S>),
+    Curly(EditorTreeCurly<S>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,16 +384,18 @@ pub enum SurroundIndex {
     Inside,
 }
 
-trait SurroundsTreeSeq {
+trait SurroundsTreeSeq: Sealed {
+    type Seq: EditorTreeSeq;
+
     fn cursor(&self) -> SurroundIndex;
     fn cursor_mut(&mut self) -> &mut SurroundIndex;
-    fn child(&self) -> &EditorTreeSeq;
-    fn child_mut(&mut self) -> &mut EditorTreeSeq;
+    fn child(&self) -> &Self::Seq;
+    fn child_mut(&mut self) -> &mut Self::Seq;
 
-    fn active_child(&self) -> Option<&EditorTreeSeq> {
+    fn active_child(&self) -> Option<&Self::Seq> {
         (self.cursor() == SurroundIndex::Inside).then_some(self.child())
     }
-    fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
+    fn active_child_mut(&mut self) -> Option<&mut Self::Seq> {
         (self.cursor() == SurroundIndex::Inside).then_some(self.child_mut())
     }
     fn set_cursor(&mut self, cursor: SurroundIndex) {
@@ -353,11 +410,14 @@ trait CompletableSurrounds: SurroundsTreeSeq {
 
 macro_rules! impl_surrounds_tree_seq {
     ($name: ident) => {
-        impl SurroundsTreeSeq for $name {
-            fn child(&self) -> &EditorTreeSeq {
+        impl<S: EditorTreeSeq> Sealed for $name<S> {}
+        impl<S: EditorTreeSeq> SurroundsTreeSeq for $name<S> {
+            type Seq = S;
+
+            fn child(&self) -> &S {
                 &self.child
             }
-            fn child_mut(&mut self) -> &mut EditorTreeSeq {
+            fn child_mut(&mut self) -> &mut S {
                 &mut self.child
             }
             fn cursor(&self) -> SurroundIndex {
@@ -368,11 +428,11 @@ macro_rules! impl_surrounds_tree_seq {
             }
         }
 
-        impl $name {
-            pub fn child(&self) -> &EditorTreeSeq {
+        impl<S: EditorTreeSeq> $name<S> {
+            pub fn child(&self) -> &S {
                 &self.child
             }
-            pub fn child_mut(&mut self) -> &mut EditorTreeSeq {
+            pub fn child_mut(&mut self) -> &mut S {
                 &mut self.child
             }
             pub fn cursor(&self) -> SurroundIndex {
@@ -387,7 +447,7 @@ macro_rules! impl_surrounds_tree_seq {
 
 macro_rules! completable_surrounds {
     ($name: ident) => {
-        impl CompletableSurrounds for $name {
+        impl<S: EditorTreeSeq> CompletableSurrounds for $name<S> {
             fn is_complete(&self) -> bool {
                 self.is_complete
             }
@@ -395,21 +455,21 @@ macro_rules! completable_surrounds {
                 &mut self.is_complete
             }
         }
-        impl $name {
+        impl<S: EditorTreeSeq> $name<S> {
             pub fn is_complete(&self) -> bool {
                 self.is_complete
             }
-            pub fn new(is_complete: bool, cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+            pub fn new(is_complete: bool, cursor: SurroundIndex, child: S) -> Self {
                 Self {
                     is_complete,
                     cursor,
                     child,
                 }
             }
-            pub fn incomplete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+            pub fn incomplete(cursor: SurroundIndex, child: S) -> Self {
                 Self::new(false, cursor, child)
             }
-            pub fn complete(cursor: SurroundIndex, child: EditorTreeSeq) -> Self {
+            pub fn complete(cursor: SurroundIndex, child: S) -> Self {
                 Self::new(true, cursor, child)
             }
         }
@@ -417,44 +477,44 @@ macro_rules! completable_surrounds {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreeSqrt {
+pub struct EditorTreeSqrt<S: EditorTreeSeq> {
     cursor: SurroundIndex,
-    child: EditorTreeSeq,
+    child: S,
 }
 impl_surrounds_tree_seq!(EditorTreeSqrt);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreeParen {
+pub struct EditorTreeParen<S: EditorTreeSeq> {
     is_complete: bool,
     cursor: SurroundIndex,
-    child: EditorTreeSeq,
+    child: S,
 }
 impl_surrounds_tree_seq!(EditorTreeParen);
 completable_surrounds!(EditorTreeParen);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreeBracket {
+pub struct EditorTreeBracket<S: EditorTreeSeq> {
     is_complete: bool,
     cursor: SurroundIndex,
-    child: EditorTreeSeq,
+    child: S,
 }
 impl_surrounds_tree_seq!(EditorTreeBracket);
 completable_surrounds!(EditorTreeBracket);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreeCurly {
+pub struct EditorTreeCurly<S: EditorTreeSeq> {
     is_complete: bool,
     cursor: SurroundIndex,
-    child: EditorTreeSeq,
+    child: S,
 }
 impl_surrounds_tree_seq!(EditorTreeCurly);
 completable_surrounds!(EditorTreeCurly);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreeAbs {
+pub struct EditorTreeAbs<S: EditorTreeSeq> {
     is_complete: bool,
     cursor: SurroundIndex,
-    child: EditorTreeSeq,
+    child: S,
 }
 impl_surrounds_tree_seq!(EditorTreeAbs);
 completable_surrounds!(EditorTreeAbs);
@@ -482,14 +542,14 @@ pub enum FractionIndex {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreeFraction {
+pub struct EditorTreeFraction<S: EditorTreeSeq> {
     cursor: FractionIndex,
-    top: EditorTreeSeq,
-    bottom: EditorTreeSeq,
+    top: S,
+    bottom: S,
 }
 
-impl EditorTreeFraction {
-    pub const fn new(cursor: FractionIndex, top: EditorTreeSeq, bottom: EditorTreeSeq) -> Self {
+impl<S: EditorTreeSeq> EditorTreeFraction<S> {
+    pub const fn new(cursor: FractionIndex, top: S, bottom: S) -> Self {
         Self {
             cursor,
             top,
@@ -501,15 +561,15 @@ impl EditorTreeFraction {
         self.cursor
     }
 
-    pub const fn top(&self) -> &EditorTreeSeq {
+    pub const fn top(&self) -> &S {
         &self.top
     }
 
-    pub const fn bottom(&self) -> &EditorTreeSeq {
+    pub const fn bottom(&self) -> &S {
         &self.bottom
     }
 
-    pub const fn active_child(&self) -> Option<&EditorTreeSeq> {
+    pub const fn active_child(&self) -> Option<&S> {
         match self.cursor {
             FractionIndex::Left => None,
             FractionIndex::Top => Some(&self.top),
@@ -517,14 +577,16 @@ impl EditorTreeFraction {
         }
     }
 
-    pub fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
+    pub fn active_child_mut(&mut self) -> Option<&mut S> {
         match self.cursor {
             FractionIndex::Left => None,
             FractionIndex::Top => Some(&mut self.top),
             FractionIndex::Bottom => Some(&mut self.bottom),
         }
     }
+}
 
+impl<S: EditorTreeSeq + TreeMovable> EditorTreeFraction<S> {
     fn move_to(&mut self, to: FractionIndex, from: Direction) {
         self.cursor = to;
         match to {
@@ -536,16 +598,16 @@ impl EditorTreeFraction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreePower {
-    power: EditorTreeSeq,
+pub struct EditorTreePower<S: EditorTreeSeq> {
+    power: S,
 }
 
-impl EditorTreePower {
-    pub const fn new(power: EditorTreeSeq) -> Self {
+impl<S: EditorTreeSeq> EditorTreePower<S> {
+    pub const fn new(power: S) -> Self {
         Self { power }
     }
 
-    pub const fn power(&self) -> &EditorTreeSeq {
+    pub const fn power(&self) -> &S {
         &self.power
     }
 }
@@ -565,22 +627,16 @@ pub enum SumOrProd {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreeSumProd {
+pub struct EditorTreeSumProd<S: EditorTreeSeq> {
     sum_or_prod: SumOrProd,
     cursor: SumProdIndex,
-    top: EditorTreeSeq,
-    bottom: EditorTreeSeq,
-    ident: EditorTreeSeq,
+    top: S,
+    bottom: S,
+    ident: S,
 }
 
-impl EditorTreeSumProd {
-    pub fn new(
-        sum_or_prod: SumOrProd,
-        cursor: SumProdIndex,
-        top: EditorTreeSeq,
-        bottom: EditorTreeSeq,
-        ident: EditorTreeSeq,
-    ) -> Self {
+impl<S: EditorTreeSeq> EditorTreeSumProd<S> {
+    pub fn new(sum_or_prod: SumOrProd, cursor: SumProdIndex, top: S, bottom: S, ident: S) -> Self {
         Self {
             sum_or_prod,
             cursor,
@@ -598,19 +654,19 @@ impl EditorTreeSumProd {
         self.cursor
     }
 
-    pub const fn top(&self) -> &EditorTreeSeq {
+    pub const fn top(&self) -> &S {
         &self.top
     }
 
-    pub const fn bottom(&self) -> &EditorTreeSeq {
+    pub const fn bottom(&self) -> &S {
         &self.bottom
     }
 
-    pub const fn ident(&self) -> &EditorTreeSeq {
+    pub const fn ident(&self) -> &S {
         &self.ident
     }
 
-    pub const fn active_child(&self) -> Option<&EditorTreeSeq> {
+    pub const fn active_child(&self) -> Option<&S> {
         match self.cursor {
             SumProdIndex::BottomExpr => Some(&self.bottom),
             SumProdIndex::BottomIdent => Some(&self.ident),
@@ -619,7 +675,7 @@ impl EditorTreeSumProd {
         }
     }
 
-    pub fn active_child_mut(&mut self) -> Option<&mut EditorTreeSeq> {
+    pub fn active_child_mut(&mut self) -> Option<&mut S> {
         match self.cursor {
             SumProdIndex::BottomExpr => Some(&mut self.bottom),
             SumProdIndex::BottomIdent => Some(&mut self.ident),
@@ -627,7 +683,9 @@ impl EditorTreeSumProd {
             SumProdIndex::Left => None,
         }
     }
+}
 
+impl<S: EditorTreeSeq + TreeMovable> EditorTreeSumProd<S> {
     fn move_to(&mut self, to: SumProdIndex, from: Direction) {
         self.cursor = to;
         match to {

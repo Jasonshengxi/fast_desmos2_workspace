@@ -3,7 +3,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-use crate::tree::{EditorTree, EditorTreeKind, EditorTreeSeq};
+use crate::tree::{EditorTree, EditorTreeKind, EditorTreeSeq, EditorTreeSeqNormal};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ExpectCategory {
@@ -39,16 +39,16 @@ pub enum SearchError {
 }
 pub type SearchResult<T> = Result<T, SearchError>;
 
-struct SearchState<'a> {
-    seq: &'a EditorTreeSeq,
+struct SearchState<'a, S: EditorTreeSeq> {
+    seq: &'a S,
     index: usize,
 }
 
-impl SearchState<'_> {
-    fn peek(&self) -> Option<&EditorTree> {
+impl<S: EditorTreeSeq> SearchState<'_, S> {
+    fn peek(&self) -> Option<&EditorTree<S>> {
         self.index
             .checked_sub(1)
-            .and_then(|left| self.seq.children.get(left))
+            .and_then(|left| self.seq.children().get(left))
     }
 
     fn advance(&mut self) {
@@ -153,7 +153,7 @@ impl SearchState<'_> {
     }
 }
 
-impl EditorTreeSeq {
+impl EditorTreeSeqNormal {
     pub fn search_back(&self, start: usize) -> SearchResult<usize> {
         let mut state = SearchState {
             seq: self,

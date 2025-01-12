@@ -1,14 +1,13 @@
 use fast_desmos2_fonts::layout::LayoutNode;
 use fast_desmos2_tree::tree::{
-    EditorTree, EditorTreeAbs, EditorTreeBracket, EditorTreeCurly, EditorTreeFraction,
-    EditorTreeKind, EditorTreeParen, EditorTreeSeq, EditorTreeTerminal,
+    EditorTree, EditorTreeAbs, EditorTreeBracket, EditorTreeCurly, EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreeSeq, EditorTreeSeqNormal, EditorTreeSeqVisual, EditorTreeTerminal
 };
 
 pub trait WithLayout {
     fn layout(&self) -> LayoutNode;
 }
 
-impl WithLayout for EditorTree {
+impl<S: EditorTreeSeq + WithLayout> WithLayout for EditorTree<S> {
     fn layout(&self) -> LayoutNode {
         match self.kind() {
             EditorTreeKind::Terminal(term) => term.layout(),
@@ -24,7 +23,13 @@ impl WithLayout for EditorTree {
     }
 }
 
-impl WithLayout for EditorTreeSeq {
+impl WithLayout for EditorTreeSeqNormal {
+    fn layout(&self) -> LayoutNode {
+        LayoutNode::horizontal(self.children().iter().map(WithLayout::layout).collect())
+    }
+}
+
+impl WithLayout for EditorTreeSeqVisual {
     fn layout(&self) -> LayoutNode {
         LayoutNode::horizontal(self.children().iter().map(WithLayout::layout).collect())
     }
@@ -36,31 +41,31 @@ impl WithLayout for EditorTreeTerminal {
     }
 }
 
-impl WithLayout for EditorTreeParen {
+impl<S: EditorTreeSeq + WithLayout> WithLayout for EditorTreeParen<S> {
     fn layout(&self) -> LayoutNode {
         LayoutNode::surround_horizontal('(', self.child().layout(), ')')
     }
 }
 
-impl WithLayout for EditorTreeBracket {
+impl<S: EditorTreeSeq + WithLayout> WithLayout for EditorTreeBracket<S> {
     fn layout(&self) -> LayoutNode {
         LayoutNode::surround_horizontal('[', self.child().layout(), ']')
     }
 }
 
-impl WithLayout for EditorTreeCurly {
+impl<S: EditorTreeSeq + WithLayout> WithLayout for EditorTreeCurly<S> {
     fn layout(&self) -> LayoutNode {
         LayoutNode::surround_horizontal('{', self.child().layout(), '}')
     }
 }
 
-impl WithLayout for EditorTreeAbs {
+impl<S: EditorTreeSeq + WithLayout> WithLayout for EditorTreeAbs<S> {
     fn layout(&self) -> LayoutNode {
         LayoutNode::surround_horizontal('|', self.child().layout(), '|')
     }
 }
 
-impl WithLayout for EditorTreeFraction {
+impl<S: EditorTreeSeq + WithLayout> WithLayout for EditorTreeFraction<S> {
     fn layout(&self) -> LayoutNode {
         LayoutNode::sandwich_vertical(self.top().layout(), self.bottom().layout())
     }

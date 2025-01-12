@@ -1,9 +1,11 @@
+use draw::{CharScreen, Debugable as _};
+use fast_desmos2_cranelift::compile;
+use fast_desmos2_eval::IdentStorer;
 use fast_desmos2_tree::tree::{
-    debug::{CharScreen, Debugable as _},
-    Direction, EditorTree as T, EditorTreeSeq as TS, FractionIndex, Motion, TreeAction,
+    Direction, EditorTree as T, EditorTreeSeqNormal as TS, FractionIndex, Motion, TreeAction,
     TreeMovable,
 };
-use fast_desmos2_tree_parser::{self as tree_parser, tree::IdentStorer};
+use fast_desmos2_tree_parser as tree_parser;
 use glam::UVec2;
 use std::{
     fmt::Display,
@@ -15,6 +17,8 @@ use termion::{
     input::TermRead,
     raw::{IntoRawMode, RawTerminal},
 };
+
+mod draw;
 
 fn make_stdout() -> RawTerminal<Stdout> {
     std::io::stdout()
@@ -104,6 +108,18 @@ fn main() -> Result<(), std::io::Error> {
             EditorMode::Leader => {
                 match key {
                     Key::Char('e') => {
+                        let idents = IdentStorer::default();
+                        let parsed = tree_parser::parse(&tree, &idents);
+                        match parsed {
+                            Ok(node) => {
+                                let func = compile(&node);
+                                let output = func();
+                                extra_text = format!("{output:#?}");
+                            }
+                            Err(err) => extra_text = format!("{err:#?}"),
+                        }
+                    }
+                    Key::Char('p') => {
                         let idents = IdentStorer::default();
                         let parsed = tree_parser::parse(&tree, &idents);
                         match parsed {
