@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 pub trait OptExt {
     type T;
     fn unwrap_unreach(self) -> Self::T;

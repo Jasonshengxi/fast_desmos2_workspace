@@ -1,7 +1,7 @@
 use crate::{tree::SumProdIndex, Sealed};
 
 use super::{
-    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreePower, EditorTreeSeq,
+    EditorTree, EditorTreeFraction, EditorTreeKind, EditorTreeSeq,
     EditorTreeSeqNormal, EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SurroundIndex,
     SurroundsTreeSeq,
 };
@@ -97,16 +97,6 @@ impl TreeMovable for EditorTreeTerminal {
     }
 
     fn enter_from(&mut self, _direction: Direction) {}
-}
-
-impl TreeMovable for EditorTreePower<EditorTreeSeqNormal> {
-    fn apply_move(&mut self, movement: Motion) -> Option<Motion> {
-        self.power.apply_move(movement)
-    }
-
-    fn enter_from(&mut self, direction: Direction) {
-        self.power.enter_from(direction);
-    }
 }
 
 impl TreeMovable for EditorTreeFraction<EditorTreeSeqNormal> {

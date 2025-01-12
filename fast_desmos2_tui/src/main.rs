@@ -1,3 +1,4 @@
+#![allow(unused)]
 use draw::{CharScreen, Debugable as _};
 use fast_desmos2_cranelift::compile;
 use fast_desmos2_eval::IdentStorer;
@@ -67,23 +68,7 @@ fn main() -> Result<(), std::io::Error> {
     let mut stdout = make_stdout();
 
     #[rustfmt::skip]
-    let mut tree = TS::one(
-        T::fraction(
-            FractionIndex::Bottom,
-            TS::one(
-                T::fraction(
-                    FractionIndex::Bottom,
-                    TS::str("1.2"),
-                    TS::str("3.2"),
-                ),
-            ),
-            TS::one(T::fraction(
-                FractionIndex::Bottom,
-                TS::str(".2"),
-                TS::str(".7"),
-            )),
-        ),
-    );
+    let mut tree = TS::empty();
 
     let mut mode = EditorMode::Normal;
 
@@ -119,6 +104,7 @@ fn main() -> Result<(), std::io::Error> {
                             Err(err) => extra_text = format!("{err:#?}"),
                         }
                     }
+                    Key::Char('q') => extra_text = format!("{tree:#?}"),
                     Key::Char('p') => {
                         let idents = IdentStorer::default();
                         let parsed = tree_parser::parse(&tree, &idents);

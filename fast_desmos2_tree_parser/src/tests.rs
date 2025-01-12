@@ -92,7 +92,7 @@ fn seq(children: Vec<EditorTree<EditorTreeSeqNormal>>) -> EditorTreeSeqNormal {
 }
 
 fn power<S: EditorTreeSeq>(power: impl Into<S>) -> EditorTree<S> {
-    EditorTree::power(power.into())
+    EditorTree::power(SurroundIndex::Inside, power.into())
 }
 
 fn one(child: EditorTree<EditorTreeSeqNormal>) -> EditorTreeSeqNormal {

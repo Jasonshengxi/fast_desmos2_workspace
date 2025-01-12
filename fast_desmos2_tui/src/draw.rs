@@ -4,10 +4,10 @@ use bitflags::bitflags;
 use glam::UVec2;
 
 use fast_desmos2_tree::tree::{
-    CompletableSurrounds, EditorTree, EditorTreeAbs, EditorTreeBracket, EditorTreeFraction,
-    EditorTreeKind, EditorTreeParen, EditorTreeSeq, EditorTreeSeqNormal, EditorTreeSqrt,
-    EditorTreeSumProd, EditorTreeTerminal, FractionIndex, SumOrProd, SumProdIndex, SurroundIndex,
-    SurroundsTreeSeq,
+    CompletableSurrounds, EditorTree, EditorTreeAbs, EditorTreeBracket, EditorTreeCurly,
+    EditorTreeFraction, EditorTreeKind, EditorTreeParen, EditorTreePower, EditorTreeSeq,
+    EditorTreeSeqNormal, EditorTreeSqrt, EditorTreeSumProd, EditorTreeTerminal, FractionIndex,
+    SumOrProd, SumProdIndex, SurroundIndex, SurroundsTreeSeq,
 };
 use termion::style;
 
@@ -20,6 +20,7 @@ pub enum Surrounder {
     Abs,
     Parens,
     Brackets,
+    Curly,
 }
 
 #[derive(Clone, Copy)]
@@ -29,6 +30,7 @@ struct SurroundInfo {
     bottom: (Option<char>, Option<char>, Option<char>),
 
     compressed: (Option<char>, Option<char>),
+    insert_middle: (Option<char>, Option<char>),
 }
 
 macro_rules! sn {
@@ -54,6 +56,7 @@ impl SurroundInfo {
         '└''─''┘'
 
         '['   ']'
+         .     .
     );
     const SQRT: Self = surround_info!(
         '┌''─''─'
@@ -61,6 +64,7 @@ impl SurroundInfo {
         '│' .  .
 
         '√'    .
+         .     .
     );
     const BRACKETS: Self = surround_info!(
         '┌' . '┐'
@@ -68,6 +72,7 @@ impl SurroundInfo {
         '└' . '┘'
 
         '['   ']'
+         .     .
     );
     const ABS: Self = surround_info!(
         '│' . '│'
@@ -75,6 +80,7 @@ impl SurroundInfo {
         '│' . '│'
 
         '|'   '|'
+         .     .
     );
     const PARENS: Self = surround_info!(
         '╭' . '╮'
@@ -82,14 +88,24 @@ impl SurroundInfo {
         '╰' . '╯'
 
         '('   ')'
+         .     .
+    );
+    const CURLY: Self = surround_info!(
+        '╭' . '╮'
+        '│'   '│'
+        '╰' . '╯'
+
+        '{'   '}'
+        '┤'   '├'
     );
 
-    const fn new([a, b, c, d, e, f, g, h, i, j]: [Option<char>; 10]) -> Self {
+    const fn new([a, b, c, d, e, f, g, h, i, j, k, l]: [Option<char>; 12]) -> Self {
         Self {
             top: (a, b, c),
             middle: (d, e),
             bottom: (f, g, h),
             compressed: (i, j),
+            insert_middle: (k, l),
         }
     }
 }
@@ -98,7 +114,9 @@ impl Surrounder {
     const fn offset(&self) -> UVec2 {
         match self {
             Surrounder::Rectangle | Surrounder::Sqrt => UVec2::ONE,
-            Surrounder::Abs | Surrounder::Parens | Surrounder::Brackets => UVec2::X,
+            Surrounder::Abs | Surrounder::Parens | Surrounder::Brackets | Surrounder::Curly => {
+                UVec2::X
+            }
         }
     }
 
@@ -106,7 +124,9 @@ impl Surrounder {
         match self {
             Surrounder::Rectangle => UVec2::splat(2),
             Surrounder::Sqrt => UVec2::ONE,
-            Surrounder::Abs | Surrounder::Parens | Surrounder::Brackets => UVec2::new(2, 0),
+            Surrounder::Abs | Surrounder::Parens | Surrounder::Brackets | Surrounder::Curly => {
+                UVec2::new(2, 0)
+            }
         }
     }
 
@@ -117,6 +137,7 @@ impl Surrounder {
             Surrounder::Abs => SurroundInfo::ABS,
             Surrounder::Parens => SurroundInfo::PARENS,
             Surrounder::Brackets => SurroundInfo::BRACKETS,
+            Surrounder::Curly => SurroundInfo::CURLY,
         }
     }
 }
@@ -272,6 +293,17 @@ impl CharScreen {
                 write(offset.with_y(y), info.middle.0, Boldness::LEFT);
                 write(outer.with_y(y), info.middle.1, Boldness::RIGHT);
             }
+            let middle_y = offset.y + size.y / 2;
+            write(
+                offset.with_y(middle_y),
+                info.insert_middle.0,
+                Boldness::LEFT,
+            );
+            write(
+                outer.with_y(middle_y),
+                info.insert_middle.1,
+                Boldness::RIGHT,
+            );
 
             write(offset, info.top.0, Boldness::TOP_LEFT);
             write(offset.with_x(outer.x), info.top.2, Boldness::TOP_RIGHT);
@@ -299,11 +331,13 @@ impl Display for CharScreen {
 pub struct DebugTree {
     offset: UVec2,
     size: UVec2,
+    baseline: u32,
     kind: DebugTreeKind,
 }
 
 #[derive(Debug)]
 pub enum DebugTreeKind {
+    Empty,
     Solid,
     Placeholder,
     HorizontalBar(Surrounder),
@@ -311,6 +345,7 @@ pub enum DebugTreeKind {
     TwoChar([char; 2]),
     Surrounds(Surrounder, Boldness, Inverted, Box<DebugTree>),
     Children(Vec<DebugTree>),
+    Power(Box<DebugTree>),
 }
 
 impl DebugTree {
@@ -322,6 +357,8 @@ impl DebugTree {
 
     fn render_to(&self, screen: &mut CharScreen, offset: UVec2) {
         match self.kind {
+            DebugTreeKind::Empty => {}
+            DebugTreeKind::Power(ref child) => child.render_to(screen, offset + child.offset),
             DebugTreeKind::Solid => {
                 for y in 0..self.size.y {
                     for x in 0..self.size.x {
@@ -356,9 +393,10 @@ impl DebugTree {
 }
 
 impl DebugTree {
-    pub const fn new(size: UVec2, kind: DebugTreeKind) -> Self {
+    pub const fn new(size: UVec2, baseline: u32, kind: DebugTreeKind) -> Self {
         Self {
             offset: UVec2::ZERO,
+            baseline,
             size,
             kind,
         }
@@ -366,63 +404,118 @@ impl DebugTree {
 
     pub fn surrounded(mut self, by: Surrounder, boldness: Boldness, inverted: Inverted) -> Self {
         self.offset += by.offset();
-        Self {
-            size: self.size + by.size(),
-            offset: UVec2::ZERO,
-            kind: DebugTreeKind::Surrounds(by, boldness, inverted, Box::new(self)),
-        }
+        Self::new(
+            self.size + by.size(),
+            self.baseline + by.size().y,
+            DebugTreeKind::Surrounds(by, boldness, inverted, Box::new(self)),
+        )
     }
 
     pub const fn horizontal_bar(width: u32, style: Surrounder) -> Self {
-        Self::new(UVec2::new(width, 1), DebugTreeKind::HorizontalBar(style))
+        Self::new(UVec2::new(width, 1), 0, DebugTreeKind::HorizontalBar(style))
     }
 
-    pub const fn solid(size: UVec2) -> Self {
-        Self::new(size, DebugTreeKind::Solid)
+    pub fn power(self) -> Self {
+        Self::new(
+            self.size,
+            self.baseline,
+            DebugTreeKind::Power(Box::new(self)),
+        )
+    }
+
+    pub const fn solid(size: UVec2, baseline: u32) -> Self {
+        Self::new(size, baseline, DebugTreeKind::Solid)
+    }
+
+    pub const fn empty(size: UVec2, baseline: u32) -> Self {
+        Self::new(size, baseline, DebugTreeKind::Empty)
     }
 
     pub const fn char(ch: char) -> Self {
-        Self::new(UVec2::ONE, DebugTreeKind::Char(ch))
+        Self::new(UVec2::ONE, 0, DebugTreeKind::Char(ch))
     }
 
     pub const fn placeholder() -> Self {
-        Self::new(UVec2::ONE, DebugTreeKind::Placeholder)
+        Self::new(UVec2::ONE, 0, DebugTreeKind::Placeholder)
     }
 
     pub const fn char2(chars: [char; 2]) -> Self {
-        Self::new(UVec2::new(2, 1), DebugTreeKind::TwoChar(chars))
+        Self::new(UVec2::new(2, 1), 0, DebugTreeKind::TwoChar(chars))
     }
 
     pub fn horizontal(mut vec: Vec<DebugTree>) -> Self {
         let mut current_x = 0;
-        let mut max_y = 0;
+        let mut lowest_baseline = 0;
+        let mut tallest_power = 0;
         for item in vec.iter_mut() {
             assert!(item.offset == UVec2::ZERO);
             item.offset.x += current_x;
             current_x += item.size.x;
 
-            max_y = max_y.max(item.size.y);
+            match item.kind {
+                DebugTreeKind::Power(_) => tallest_power = tallest_power.max(item.size.y),
+                _ => lowest_baseline = lowest_baseline.max(item.baseline),
+            }
         }
-        vec.iter_mut()
-            .for_each(|t| t.offset.y = (max_y - t.size.y) / 2);
 
-        Self::new(UVec2::new(current_x, max_y), DebugTreeKind::Children(vec))
+        vec.iter_mut().for_each(|t| match t.kind {
+            DebugTreeKind::Power(_) => t.offset.y = tallest_power - t.size.y,
+            _ => t.offset.y = tallest_power + lowest_baseline - t.baseline,
+        });
+
+        let max_y = vec
+            .iter()
+            .map(|item| item.size.y + item.offset.y)
+            .max()
+            .unwrap_or(1);
+
+        let mut last_lowest = 0;
+        for item in vec.iter_mut() {
+            if let DebugTreeKind::Power(child) = &mut item.kind {
+                if let DebugTreeKind::Children(children) = &mut child.kind {
+                    let first = &mut children[0];
+                    if matches!(first.kind, DebugTreeKind::Solid) {
+                        let size = last_lowest - child.offset.y;
+                        first.size.y = size;
+                    }
+                }
+            }
+
+            last_lowest = item.offset.y + item.size.y;
+        }
+
+        Self::new(
+            UVec2::new(current_x, max_y),
+            lowest_baseline,
+            DebugTreeKind::Children(vec),
+        )
     }
 
     pub fn vertical(mut vec: Vec<DebugTree>) -> Self {
+        let middle_item = vec.len() / 2;
+
         let mut current_y = 0;
         let mut max_x = 0;
-        for item in vec.iter_mut() {
+        let mut baseline = 0;
+        for (index, item) in vec.iter_mut().enumerate() {
             assert!(item.offset == UVec2::ZERO);
             item.offset.y += current_y;
             current_y += item.size.y;
 
             max_x = max_x.max(item.size.x);
+
+            if index == middle_item {
+                baseline = item.baseline + item.offset.y;
+            }
         }
         vec.iter_mut()
             .for_each(|t| t.offset.x = (max_x - t.size.x) / 2);
 
-        Self::new(UVec2::new(max_x, current_y), DebugTreeKind::Children(vec))
+        Self::new(
+            UVec2::new(max_x, current_y),
+            baseline,
+            DebugTreeKind::Children(vec),
+        )
     }
 }
 
@@ -441,13 +534,24 @@ impl Debugable for EditorTreeSeqNormal {
         if self.children().is_empty() {
             nodes.push(DebugTree::placeholder());
         }
+        let mut debug_tree = DebugTree::horizontal(nodes);
 
         if is_cursor_last {
-            let max_y = nodes.iter().map(|node| node.size.y).max().unwrap_or(1);
-            nodes.push(DebugTree::solid(UVec2::new(1, max_y)))
-        }
+            let DebugTreeKind::Children(children) = &mut debug_tree.kind else {
+                unreachable!()
+            };
 
-        DebugTree::horizontal(nodes)
+            let last_item = children.last().unwrap();
+            let last_baseline = last_item.baseline + last_item.offset.y;
+
+            let x_pos = debug_tree.size.x;
+            let mut cursor = DebugTree::solid(UVec2::new(1, debug_tree.size.y), last_baseline);
+            cursor.offset.x = x_pos;
+            children.push(cursor);
+            debug_tree.size.x += 1;
+        };
+
+        debug_tree
     }
 }
 
@@ -474,7 +578,7 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeFraction<S> {
         let tree = DebugTree::vertical(vec![top, bar, bottom]);
 
         if with_cursor && self.cursor() == FractionIndex::Left {
-            let cursor = DebugTree::solid(UVec2::new(1, tree.size.y));
+            let cursor = DebugTree::solid(UVec2::new(1, tree.size.y), tree.baseline);
             DebugTree::horizontal(vec![cursor, tree])
         } else {
             tree
@@ -508,7 +612,7 @@ where
 
     if with_cursor && tree.cursor() == SurroundIndex::Left {
         DebugTree::horizontal(vec![
-            DebugTree::solid(UVec2::new(1, debug_tree.size.y)),
+            DebugTree::solid(UVec2::new(1, debug_tree.size.y), debug_tree.baseline),
             debug_tree,
         ])
     } else {
@@ -534,6 +638,12 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeBracket<S> {
     }
 }
 
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeCurly<S> {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        debug_completable_surrounds(self, with_cursor, Surrounder::Curly)
+    }
+}
+
 impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeSqrt<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         let tree = self
@@ -541,7 +651,10 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeSqrt<S> {
             .debug(with_cursor && self.cursor() == SurroundIndex::Inside)
             .surrounded(Surrounder::Sqrt, Boldness::all(), Inverted::empty());
         if with_cursor && self.cursor() == SurroundIndex::Left {
-            DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, tree.size.y)), tree])
+            DebugTree::horizontal(vec![
+                DebugTree::solid(UVec2::new(1, tree.size.y), tree.baseline),
+                tree,
+            ])
         } else {
             tree
         }
@@ -568,11 +681,29 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreeSumProd<S> {
         ]);
 
         match (self.cursor(), with_cursor) {
-            (SumProdIndex::Left, true) => {
-                DebugTree::horizontal(vec![DebugTree::solid(UVec2::new(1, result.size.y)), result])
-            }
+            (SumProdIndex::Left, true) => DebugTree::horizontal(vec![
+                DebugTree::solid(UVec2::new(1, result.size.y), result.baseline),
+                result,
+            ]),
             _ => result,
         }
+    }
+}
+
+impl<S: EditorTreeSeq + Debugable> Debugable for EditorTreePower<S> {
+    fn debug(&self, with_cursor: bool) -> DebugTree {
+        let power = self
+            .child()
+            .debug(with_cursor && self.cursor() == SurroundIndex::Inside);
+        if with_cursor && self.cursor() == SurroundIndex::Left {
+            DebugTree::horizontal(vec![
+                DebugTree::solid(UVec2::new(1, power.size.y), power.baseline),
+                power,
+            ])
+        } else {
+            power
+        }
+        .power()
     }
 }
 
@@ -580,13 +711,13 @@ impl<S: EditorTreeSeq + Debugable> Debugable for EditorTree<S> {
     fn debug(&self, with_cursor: bool) -> DebugTree {
         match self.kind() {
             EditorTreeKind::Terminal(term) => term.debug(with_cursor),
-            EditorTreeKind::Power(_) => todo!(),
+            EditorTreeKind::Power(power) => power.debug(with_cursor),
             EditorTreeKind::Fraction(fraction) => fraction.debug(with_cursor),
             EditorTreeKind::Sqrt(sqrt) => sqrt.debug(with_cursor),
             EditorTreeKind::Paren(paren) => paren.debug(with_cursor),
             EditorTreeKind::Abs(abs) => abs.debug(with_cursor),
             EditorTreeKind::Bracket(bracket) => bracket.debug(with_cursor),
-            EditorTreeKind::Curly(_) => todo!(),
+            EditorTreeKind::Curly(curly) => curly.debug(with_cursor),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.debug(with_cursor),
         }
     }

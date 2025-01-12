@@ -7,7 +7,6 @@ use crate::Sealed;
 mod actions;
 mod movement;
 
-
 pub trait EditorTreeSeq: Debug + Clone + PartialEq + Sized {
     fn children(&self) -> &[EditorTree<Self>];
     fn children_mut(&mut self) -> &mut Vec<EditorTree<Self>>;
@@ -208,6 +207,10 @@ impl<S: EditorTreeSeq> EditorTree<S> {
         Self::new(EditorTreeKind::Sqrt(EditorTreeSqrt { cursor, child }))
     }
 
+    pub fn power(cursor: SurroundIndex, child: S) -> Self {
+        Self::new(EditorTreeKind::Power(EditorTreePower { cursor, child }))
+    }
+
     pub fn complete_paren(cursor: SurroundIndex, child: S) -> Self {
         Self::new(EditorTreeKind::Paren(EditorTreeParen::complete(
             cursor, child,
@@ -274,10 +277,6 @@ impl<S: EditorTreeSeq> EditorTree<S> {
         )))
     }
 
-    pub fn power(power: S) -> Self {
-        Self::new(EditorTreeKind::Power(EditorTreePower::new(power)))
-    }
-
     pub fn fraction(cursor: FractionIndex, top: S, bottom: S) -> Self {
         Self::new(EditorTreeKind::Fraction(EditorTreeFraction::new(
             cursor, top, bottom,
@@ -310,7 +309,7 @@ impl<S: EditorTreeSeq> EditorTree<S> {
         match &self.kind {
             EditorTreeKind::Terminal(_) => None,
             EditorTreeKind::Fraction(fraction) => fraction.active_child(),
-            EditorTreeKind::Power(power) => Some(power.power()),
+            EditorTreeKind::Power(power) => power.active_child(),
             EditorTreeKind::Sqrt(sqrt) => sqrt.active_child(),
             EditorTreeKind::SumProd(sum_prod) => sum_prod.active_child(),
             EditorTreeKind::Paren(paren) => paren.active_child(),
@@ -494,6 +493,13 @@ pub struct EditorTreeSqrt<S: EditorTreeSeq> {
 impl_surrounds_tree_seq!(EditorTreeSqrt);
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EditorTreePower<S: EditorTreeSeq> {
+    cursor: SurroundIndex,
+    child: S,
+}
+impl_surrounds_tree_seq!(EditorTreePower);
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorTreeParen<S: EditorTreeSeq> {
     is_complete: bool,
     cursor: SurroundIndex,
@@ -529,9 +535,15 @@ pub struct EditorTreeAbs<S: EditorTreeSeq> {
 impl_surrounds_tree_seq!(EditorTreeAbs);
 completable_surrounds!(EditorTreeAbs);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct EditorTreeTerminal {
     ch: char,
+}
+
+impl Debug for EditorTreeTerminal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("EditorTreeTerminal").field(&self.ch).finish()
+    }
 }
 
 impl EditorTreeTerminal {
@@ -604,21 +616,6 @@ impl<S: EditorTreeSeq + TreeMovable> EditorTreeFraction<S> {
             FractionIndex::Top => self.top.enter_from(from),
             FractionIndex::Bottom => self.bottom.enter_from(from),
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EditorTreePower<S: EditorTreeSeq> {
-    power: S,
-}
-
-impl<S: EditorTreeSeq> EditorTreePower<S> {
-    pub const fn new(power: S) -> Self {
-        Self { power }
-    }
-
-    pub const fn power(&self) -> &S {
-        &self.power
     }
 }
 

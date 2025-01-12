@@ -354,7 +354,7 @@ macro_rules! chained_parsers {
 chained_parsers! {
     parens_chained "parens expr": EditorTreeKind::Paren(parens) => parens.child(),
     brackets_chained "brackets expr": EditorTreeKind::Bracket(brackets) => brackets.child(),
-    power_chained "power expr": EditorTreeKind::Power(power) => power.power(),
+    power_chained "power expr": EditorTreeKind::Power(power) => power.child(),
     abs_chained "abs expr": EditorTreeKind::Abs(abs) => abs.child(),
     sqrt_chained "sqrt expr": EditorTreeKind::Sqrt(sqrt) => sqrt.child(),
 }
