@@ -8,8 +8,6 @@ use super::{
     movement::Direction, EditorTree, EditorTreeSeqNormal, SumProdIndex, SurroundIndex, TreeMovable,
 };
 
-mod search_back;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeAction {
     Char(char),

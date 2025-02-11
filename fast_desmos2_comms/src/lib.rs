@@ -13,6 +13,8 @@ use uiua::Value;
 
 pub const DEFAULT_PORT: u16 = 45459;
 
+mod value;
+
 #[cfg(feature = "server")]
 pub enum Server {
     Dead,

@@ -6,6 +6,7 @@ use crate::Sealed;
 
 mod actions;
 mod movement;
+mod search_back;
 
 pub trait EditorTreeSeq: Debug + Clone + PartialEq + Sized {
     fn children(&self) -> &[EditorTree<Self>];
@@ -321,6 +322,18 @@ impl<S: EditorTreeSeq> EditorTree<S> {
 
     pub fn is_terminal_and_eq(&self, other: char) -> bool {
         self.is_terminal_and(|x| x.ch == other)
+    }
+
+    pub fn is_terminal_alphabetic(&self) -> bool {
+        self.is_terminal_and(|x| x.ch.is_ascii_alphabetic())
+    }
+
+    pub fn is_terminal_digit(&self) -> bool {
+        self.is_terminal_and(|x| x.ch.is_ascii_digit())
+    }
+
+    pub fn is_terminal_alphanumeric(&self) -> bool {
+        self.is_terminal_and(|x| x.ch.is_ascii_alphanumeric())
     }
 
     pub fn is_terminal_and(&self, func: impl FnOnce(&EditorTreeTerminal) -> bool) -> bool {

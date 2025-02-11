@@ -58,46 +58,54 @@ IntersectResult line_intersects(vec2 pos, vec2 p1, vec2 p2) {
     }
 }
 
-bool quad_bounds_check(vec2 pos, vec2 p1, vec2 p2) {
-    float y_min = min(p1.y, p2.y);
-    float y_max = max(p1.y, p2.y);
-
-    if (is_between(pos.y, y_min, y_max)) {
-        return true;
-    }
-    
-    float t_y_tip = p1.y / (p1.y + p2.y);
-
-    if (!is_between(t_y_tip, 0.0, 1.0)) {
-        return false;
-    }
-
-    // since the control point has been offset to 0,
-    // f(t) = (1 - t)^2 * p1 + t^2 * p2
-    float y_tip = (1.0 - t_y_tip) * (1.0 - t_y_tip) * p1.y + t_y_tip * t_y_tip * p2.y;
-
-    float y_min_bound = y_min;
-    float y_max_bound = y_max;
-    if (y_tip > y_max_bound) {
-        y_max_bound = y_tip;
-    } else if (y_tip < y_min_bound) {
-        y_min_bound = y_tip;
-    } else {
-        return false;
-    }
-
-    bool in_bounds = is_between(pos.y, y_min_bound, y_max_bound);
-    return in_bounds;
-}
+// bool quad_bounds_check(vec2 pos, vec2 p1, vec2 p2) {
+//     float y_min = min(p1.y, p2.y);
+//     float y_max = max(p1.y, p2.y);
+//
+//     if (is_between(pos.y, y_min, y_max)) {
+//         return true;
+//     }
+//     
+//     float t_y_tip = p1.y / (p1.y + p2.y);
+//
+//     if (!is_between(t_y_tip, 0.0, 1.0)) {
+//         return false;
+//     }
+//
+//     // since the control point has been offset to 0,
+//     // f(t) = (1 - t)^2 * p1 + t^2 * p2
+//     float y_tip = (1.0 - t_y_tip) * (1.0 - t_y_tip) * p1.y + t_y_tip * t_y_tip * p2.y;
+//
+//     float y_min_bound = y_min;
+//     float y_max_bound = y_max;
+//     if (y_tip > y_max_bound) {
+//         y_max_bound = y_tip;
+//     } else if (y_tip < y_min_bound) {
+//         y_min_bound = y_tip;
+//     } else {
+//         return false;
+//     }
+//
+//     bool in_bounds = is_between(pos.y, y_min_bound, y_max_bound);
+//     return in_bounds;
+// }
 
 IntersectResult quad_intersects(vec2 Pos, vec2 P1, vec2 cp, vec2 P2) {
     vec2 p1 = cp - P1;
     vec2 p2 = cp - P2;
     vec2 pos = cp - Pos;
     
-    if (!quad_bounds_check(pos, p1, p2)) {
-        return IntersectResult(0u, infinity(), 0u);
-    }
+    // if (!quad_bounds_check(pos, p1, p2)) {
+    //     return IntersectResult(0u, infinity(), 0u);
+    // }
+
+
+    /*
+     * The idea:
+     * - shift the coordinates such that the control point is at the origin
+     * - in this form, the equation becomes (1-t)^2 P1 + t^2 P2
+     * - in quadratic form, it becomes (P1 + P2) t^2 + (-2 P1) t + P1
+     */
     
     float y_sum = p1.y + p2.y;
     
@@ -190,9 +198,9 @@ void main() {
                 end   = glyph_points[last_close];
                 last_close = point_ind;
 
-                result = line_intersects(glyph_pos, start, end);
-                total_intersects += result.intersects;
-                total_row += result.row_intersects;
+                // result = line_intersects(glyph_pos, start, end);
+                // total_intersects += result.intersects;
+                // total_row += result.row_intersects;
                 break;
             default:
                 color = vec4(1.0, 0.0, 0.0, 1.0);
